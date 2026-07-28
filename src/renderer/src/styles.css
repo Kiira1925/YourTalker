@@ -23,6 +23,25 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, summary { cursor: pointer; }
 
+.startup-error {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  color: #382f2a;
+  background: #f4f1eb;
+}
+.startup-error section {
+  width: min(560px, 100%);
+  padding: 32px;
+  border: 1px solid #d9cec2;
+  border-radius: 20px;
+  background: #fffdf9;
+  box-shadow: 0 18px 50px rgb(65 47 36 / 10%);
+}
+.startup-error h1 { margin: 0 0 12px; font-size: 24px; }
+.startup-error p { margin: 0; line-height: 1.7; }
+
 .app-shell {
   display: grid;
   grid-template-columns: 264px minmax(480px, 1fr) 352px;
