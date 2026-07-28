@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatEvent } from '../src/shared/types'
+import type { CharacterAnalysisResult, ChatEvent } from '../src/shared/types'
 
 const mocks = vi.hoisted(() => ({ create: vi.fn() }))
 
@@ -52,7 +52,103 @@ async function* textStream(...parts: string[]) {
   for (const part of parts) yield { type: 'response.output_text.delta' as const, delta: part }
 }
 
+function analysisResult(
+  overrides: Partial<CharacterAnalysisResult> = {}
+): CharacterAnalysisResult {
+  return {
+    name: '',
+    callingName: '',
+    overview: '',
+    personality: '',
+    values: '',
+    world: '',
+    relationship: '',
+    speechStyle: '',
+    catchphrases: '',
+    likes: '',
+    taboos: '',
+    sampleDialogue: '',
+    notes: '',
+    ...overrides
+  }
+}
+
 describe('OpenAIService', () => {
+  it('extracts a character profile from an introduction with strict structured output', async () => {
+    const { store, character, service } = await fixture()
+    mocks.create.mockResolvedValueOnce({
+      output_text: JSON.stringify(
+        analysisResult({
+          name: '宵',
+          callingName: 'きみ',
+          overview: '月面都市で古書店を営む青年',
+          personality: '無口だが面倒見がよい',
+          world: '月面都市',
+          catchphrases: 'まいったな'
+        })
+      )
+    })
+
+    const saved = await service.analyzeCharacterDescription(
+      character.id,
+      '宵は月面都市で古書店を営む、無口だが面倒見のよい青年。',
+      'overwrite'
+    )
+
+    expect(saved).toMatchObject({
+      name: '宵',
+      callingName: 'きみ',
+      overview: '月面都市で古書店を営む青年',
+      personality: '無口だが面倒見がよい',
+      world: '月面都市',
+      catchphrases: 'まいったな'
+    })
+    expect((await store.getCharacter(character.id)).overview).toBe('月面都市で古書店を営む青年')
+    const request = mocks.create.mock.calls[0][0]
+    expect(request.store).toBe(false)
+    expect(request.text.format).toMatchObject({
+      type: 'json_schema',
+      name: 'character_profile_analysis',
+      strict: true
+    })
+  })
+
+  it('fills only empty profile fields when requested', async () => {
+    const { character, service } = await fixture()
+    mocks.create.mockResolvedValueOnce({
+      output_text: JSON.stringify(
+        analysisResult({
+          name: '別の名前',
+          overview: '夜の街を見守る案内人',
+          speechStyle: '長く丁寧に話す'
+        })
+      )
+    })
+
+    const saved = await service.analyzeCharacterDescription(
+      character.id,
+      '夜の街を見守る案内人。長く丁寧に話す。',
+      'fill-empty'
+    )
+
+    expect(saved.name).toBe('宵')
+    expect(saved.speechStyle).toBe('短めのため口')
+    expect(saved.overview).toBe('夜の街を見守る案内人')
+  })
+
+  it('does not change the character when structured analysis is invalid', async () => {
+    const { store, character, service } = await fixture()
+    mocks.create.mockResolvedValueOnce({
+      output_text: JSON.stringify({ name: '途中までの結果' })
+    })
+
+    await expect(
+      service.analyzeCharacterDescription(character.id, '短すぎる紹介文', 'overwrite')
+    ).rejects.toThrow('紹介文を設定項目へ正しく整理できませんでした')
+
+    expect(await store.getCharacter(character.id)).toEqual(character)
+  })
+
   it('streams deltas and commits only the completed assistant message', async () => {
     const { store, conversation, events, service } = await fixture()
     mocks.create.mockResolvedValue(textStream('おかえり。', '今日はどうしたの？'))

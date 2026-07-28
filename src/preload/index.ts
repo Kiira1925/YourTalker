@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   CharacterProfile,
+  CharacterAnalysisMode,
   ChatEvent,
   ImportMode,
   ReasoningEffort,
@@ -13,6 +14,8 @@ const api: YourTalkerApi = {
   character: {
     create: () => ipcRenderer.invoke('character:create'),
     save: (character: CharacterProfile) => ipcRenderer.invoke('character:save', character),
+    analyzeDescription: (characterId: string, description: string, mode: CharacterAnalysisMode) =>
+      ipcRenderer.invoke('character:analyze-description', characterId, description, mode),
     remove: (characterId: string) => ipcRenderer.invoke('character:remove', characterId)
   },
   conversation: {

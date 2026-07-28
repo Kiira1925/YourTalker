@@ -70,6 +70,15 @@ function registerIpc(): void {
     return character
   })
   ipcMain.handle('character:save', async (_event, raw) => store.saveCharacter(characterSchema.parse(raw)))
+  ipcMain.handle('character:analyze-description', async (_event, rawId, rawDescription, rawMode) => {
+    const mode = rawMode as 'overwrite' | 'fill-empty'
+    if (!['overwrite', 'fill-empty'].includes(mode)) throw new Error('反映方法が不正です。')
+    return openai.analyzeCharacterDescription(
+      uuidSchema.parse(rawId),
+      nonEmptyTextSchema.parse(rawDescription),
+      mode
+    )
+  })
   ipcMain.handle('character:remove', async (_event, rawId) => {
     await store.deleteCharacter(uuidSchema.parse(rawId))
     return bootstrap()
