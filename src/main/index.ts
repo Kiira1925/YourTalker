@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import log from 'electron-log/main'
 import {
   characterSchema,
   nonEmptyTextSchema,
@@ -28,7 +29,7 @@ function createWindow(): void {
     backgroundColor: '#f4f1eb',
     title: 'YourTalker',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -36,6 +37,15 @@ function createWindow(): void {
   })
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    log.error('Preload script failed', preloadPath, error)
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    log.error('Renderer failed to load', { errorCode, errorDescription, validatedURL })
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log.error('Renderer process exited', details)
+  })
 
   if (process.env.NODE_ENV === 'development' && process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -166,6 +176,7 @@ async function exportBundle(characterId?: string): Promise<string | null> {
 }
 
 app.whenReady().then(async () => {
+  log.initialize()
   const dataDir = join(app.getPath('appData'), 'YourTalker', 'data')
   store = new JsonStore(dataDir)
   await store.init()

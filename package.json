@@ -1,6 +1,6 @@
 {
   "name": "yourtalker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "育てたキャラクターと会話できる、ローカルファーストのデスクトップアプリ",
   "main": "./out/main/index.js",
   "author": "YourTalker",
@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run typecheck && electron-vite build && node scripts/verify-preload-build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
