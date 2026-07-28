@@ -1,0 +1,303 @@
+import { randomUUID } from 'node:crypto'
+import OpenAI from 'openai'
+import type { BrowserWindow } from 'electron'
+import { correctionResultSchema } from '../shared/schemas'
+import {
+  SCHEMA_VERSION,
+  type CharacterProfile,
+  type ChatEvent,
+  type Conversation,
+  type Correction,
+  type CorrectionResult,
+  type Message
+} from '../shared/types'
+import { applyCorrectionState, compileCharacterInstructions, conversationInput } from './domain'
+import type { SecretStore } from './secrets'
+import type { JsonStore } from './store'
+
+function timestamp(): string {
+  return new Date().toISOString()
+}
+
+function newMessage(role: 'user' | 'assistant', content: string): Message {
+  const createdAt = timestamp()
+  return {
+    id: randomUUID(),
+    schemaVersion: SCHEMA_VERSION,
+    createdAt,
+    updatedAt: createdAt,
+    role,
+    content,
+    status: 'complete'
+  }
+}
+
+function friendlyError(error: unknown): string {
+  if (error instanceof OpenAI.AuthenticationError) return 'APIキーが正しくありません。設定を確認してください。'
+  if (error instanceof OpenAI.RateLimitError) return 'OpenAI APIの利用上限に達しました。少し待ってから再試行してください。'
+  if (error instanceof OpenAI.APIConnectionError) return 'OpenAI APIへ接続できません。ネットワークを確認してください。'
+  if (error instanceof Error && error.name === 'AbortError') return '生成を中止しました。'
+  if (error instanceof Error) return error.message
+  return '予期しないエラーが発生しました。'
+}
+
+export class OpenAIService {
+  private readonly active = new Map<string, AbortController>()
+
+  constructor(
+    private readonly store: JsonStore,
+    private readonly secrets: SecretStore,
+    private readonly window: () => BrowserWindow | null
+  ) {}
+
+  private emit(event: ChatEvent): void {
+    this.window()?.webContents.send('chat:event', event)
+  }
+
+  async startChat(conversationId: string, content: string, retryMessageId?: string): Promise<string> {
+    let conversation = await this.store.getConversation(conversationId)
+    const existing = retryMessageId
+      ? conversation.messages.find((message) => message.id === retryMessageId && message.role === 'user')
+      : undefined
+    const userMessage = existing
+      ? { ...existing, content, status: 'complete' as const, updatedAt: timestamp() }
+      : newMessage('user', content)
+
+    conversation = {
+      ...conversation,
+      title:
+        conversation.messages.length === 0
+          ? content.replace(/\s+/g, ' ').trim().slice(0, 32) || '新しい会話'
+          : conversation.title,
+      messages: existing
+        ? conversation.messages.map((message) => (message.id === existing.id ? userMessage : message))
+        : [...conversation.messages, userMessage],
+      updatedAt: timestamp()
+    }
+    conversation = await this.store.saveConversation(conversation)
+
+    const requestId = randomUUID()
+    const controller = new AbortController()
+    this.active.set(requestId, controller)
+    this.emit({ type: 'accepted', requestId, conversation })
+    void this.runChat(requestId, conversation, userMessage.id, controller)
+    return requestId
+  }
+
+  cancel(requestId: string): void {
+    this.active.get(requestId)?.abort()
+  }
+
+  private async runChat(
+    requestId: string,
+    conversation: Conversation,
+    userMessageId: string,
+    controller: AbortController
+  ): Promise<void> {
+    try {
+      const [character, settings, apiKey] = await Promise.all([
+        this.store.getCharacter(conversation.characterId),
+        this.store.getSettings(),
+        this.secrets.get()
+      ])
+      const client = new OpenAI({ apiKey })
+      const stream = await client.responses.create(
+        {
+          model: settings.model,
+          reasoning: { effort: settings.reasoningEffort },
+          instructions: compileCharacterInstructions(character),
+          input: conversationInput(conversation),
+          safety_identifier: settings.id,
+          store: false,
+          stream: true
+        },
+        { signal: controller.signal }
+      )
+
+      let content = ''
+      for await (const event of stream) {
+        if (event.type === 'response.output_text.delta') {
+          content += event.delta
+          this.emit({ type: 'delta', requestId, delta: event.delta })
+        }
+      }
+      if (!content.trim()) throw new Error('空の応答が返されました。')
+
+      const fresh = await this.store.getConversation(conversation.id)
+      const assistantMessage = newMessage('assistant', content)
+      const completed = await this.store.saveConversation({
+        ...fresh,
+        messages: [...fresh.messages, assistantMessage],
+        updatedAt: timestamp()
+      })
+      this.emit({ type: 'completed', requestId, conversation: completed })
+      void this.summarizeIfNeeded(completed, character, client)
+    } catch (error) {
+      const fresh = await this.store.getConversation(conversation.id)
+      const failed = await this.store.saveConversation({
+        ...fresh,
+        messages: fresh.messages.map((message) =>
+          message.id === userMessageId ? { ...message, status: 'failed' as const, updatedAt: timestamp() } : message
+        ),
+        updatedAt: timestamp()
+      })
+      if (controller.signal.aborted) {
+        this.emit({ type: 'cancelled', requestId, conversation: failed })
+      } else {
+        this.emit({ type: 'error', requestId, message: friendlyError(error), conversation: failed })
+      }
+    } finally {
+      this.active.delete(requestId)
+    }
+  }
+
+  private async summarizeIfNeeded(
+    conversation: Conversation,
+    character: CharacterProfile,
+    client: OpenAI
+  ): Promise<void> {
+    if (conversation.messages.length < 50) return
+    const olderMessages = conversation.messages.slice(0, -30)
+    const lastIncluded = olderMessages.at(-1)
+    if (!lastIncluded || conversation.summaryThroughMessageId === lastIncluded.id) return
+    try {
+      const settings = await this.store.getSettings()
+      const response = await client.responses.create({
+        model: settings.model,
+        reasoning: { effort: 'low' },
+        instructions:
+          '会話継続用の簡潔な日本語要約を作成してください。関係性、出来事、約束、感情の変化、固有名詞を残し、話し方の模倣は不要です。',
+        input: [
+          ...(conversation.summary
+            ? [{ role: 'user' as const, content: `既存の要約:\n${conversation.summary}` }]
+            : []),
+          {
+            role: 'user' as const,
+            content: olderMessages.map((message) => `${message.role === 'user' ? 'ユーザー' : character.name}: ${message.content}`).join('\n')
+          }
+        ],
+        safety_identifier: settings.id,
+        store: false
+      })
+      const current = await this.store.getConversation(conversation.id)
+      await this.store.saveConversation({
+        ...current,
+        summary: response.output_text.trim(),
+        summaryThroughMessageId: lastIncluded.id,
+        updatedAt: timestamp()
+      })
+    } catch {
+      // Summarization is best-effort and must never break the chat.
+    }
+  }
+
+  async applyCorrection(conversationId: string, messageId: string, feedback: string): Promise<void> {
+    const conversation = await this.store.getConversation(conversationId)
+    const character = await this.store.getCharacter(conversation.characterId)
+    const message = conversation.messages.find((item) => item.id === messageId && item.role === 'assistant')
+    if (!message) throw new Error('修正対象の返答が見つかりません。')
+    const [settings, apiKey] = await Promise.all([this.store.getSettings(), this.secrets.get()])
+    const client = new OpenAI({ apiKey })
+    const result = await this.generateCorrection(client, settings.model, settings.id, character, conversation, message, feedback)
+    const createdAt = timestamp()
+    const correction: Correction = {
+      id: randomUUID(),
+      schemaVersion: SCHEMA_VERSION,
+      createdAt,
+      updatedAt: createdAt,
+      conversationId,
+      messageId,
+      feedbackText: feedback,
+      derivedRule: result.derivedRule,
+      originalReply: message.content,
+      revisedReply: result.revisedReply,
+      active: true
+    }
+    const nextCharacter: CharacterProfile = {
+      ...character,
+      corrections: [...character.corrections, correction],
+      learnedGuidance: result.learnedGuidance,
+      updatedAt: createdAt
+    }
+    const nextConversation: Conversation = {
+      ...conversation,
+      messages: conversation.messages.map((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              originalContent: item.originalContent ?? item.content,
+              content: result.revisedReply,
+              correctionId: correction.id,
+              updatedAt: createdAt
+            }
+          : item
+      ),
+      updatedAt: createdAt
+    }
+    await this.store.commitCorrection(nextCharacter, nextConversation)
+  }
+
+  async toggleCorrection(characterId: string, correctionId: string, active: boolean): Promise<void> {
+    const character = await this.store.getCharacter(characterId)
+    const correction = character.corrections.find((item) => item.id === correctionId)
+    if (!correction) throw new Error('指摘履歴が見つかりません。')
+    const conversation = await this.store.getConversation(correction.conversationId)
+    const next = applyCorrectionState(character, conversation, correctionId, active)
+    await this.store.commitCorrection(next.character, next.conversation)
+  }
+
+  private async generateCorrection(
+    client: OpenAI,
+    model: string,
+    safetyIdentifier: string,
+    character: CharacterProfile,
+    conversation: Conversation,
+    message: Message,
+    feedback: string
+  ): Promise<CorrectionResult> {
+    const response = await client.responses.create({
+      model,
+      reasoning: { effort: 'low' },
+      instructions: [
+        'キャラクター会話へのユーザー指摘を、今後も適用できる簡潔なルールへ変換してください。',
+        'learnedGuidanceには既存ルールを保ちつつ新ルールを統合してください。',
+        'revisedReplyは指摘を反映し、会話の流れとキャラクター設定に沿った返答だけを書いてください。'
+      ].join('\n'),
+      input: [
+        {
+          role: 'user',
+          content: [
+            `キャラクター設定:\n${compileCharacterInstructions(character)}`,
+            `直前までの会話:\n${conversation.messages.slice(-10).map((item) => `${item.role}: ${item.content}`).join('\n')}`,
+            `修正対象:\n${message.content}`,
+            `ユーザーの指摘:\n${feedback}`
+          ].join('\n\n')
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'character_correction',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              derivedRule: { type: 'string' },
+              learnedGuidance: { type: 'string' },
+              revisedReply: { type: 'string' }
+            },
+            required: ['derivedRule', 'learnedGuidance', 'revisedReply']
+          }
+        }
+      },
+      safety_identifier: safetyIdentifier,
+      store: false
+    })
+    try {
+      return correctionResultSchema.parse(JSON.parse(response.output_text))
+    } catch {
+      throw new Error('指摘内容を正しく構造化できませんでした。もう一度お試しください。')
+    }
+  }
+}

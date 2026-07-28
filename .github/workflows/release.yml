@@ -1,0 +1,65 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $expected = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expected) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $expected"
+          }
+
+      - name: Test
+        run: npm test
+
+      - name: Build update-enabled installer
+        run: npm run package:win
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+      - name: Publish release assets atomically
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = $env:GITHUB_REF_NAME
+          $installer = "release/YourTalker-Setup-$version.exe"
+          $blockmap = "$installer.blockmap"
+          $metadata = "release/latest.yml"
+
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --draft --generate-notes --title "YourTalker $version"
+          }
+
+          gh release upload $tag $installer $blockmap --clobber
+          gh release upload $tag $metadata --clobber
+          gh release edit $tag --draft=false --latest

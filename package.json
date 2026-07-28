@@ -1,0 +1,39 @@
+{
+  "name": "yourtalker",
+  "version": "0.2.0",
+  "description": "育てたキャラクターと会話できる、ローカルファーストのデスクトップアプリ",
+  "main": "./out/main/index.js",
+  "author": "YourTalker",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package:win": "npm run build && electron-builder --config electron-builder.config.cjs --win nsis --publish never",
+    "preview": "electron-vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "1.27.0",
+    "electron-log": "5.4.4",
+    "electron-updater": "6.8.9",
+    "openai": "7.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "5.9.3",
+    "vite": "7.2.7",
+    "vitest": "4.1.10"
+  }
+}
