@@ -77,8 +77,11 @@ export function createConversation(characterId: string): Conversation {
 function createSettings(): AppSettings {
   return {
     ...newBase(),
+    modelProvider: 'openai',
     model: 'gpt-5.6-terra',
-    reasoningEffort: 'low'
+    reasoningEffort: 'low',
+    ollamaBaseUrl: 'http://127.0.0.1:11434',
+    ollamaModel: ''
   }
 }
 

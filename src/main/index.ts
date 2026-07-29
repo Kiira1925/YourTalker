@@ -7,8 +7,9 @@ import {
   nonEmptyTextSchema,
   uuidSchema
 } from '../shared/schemas'
-import type { ImportMode, ReasoningEffort } from '../shared/types'
+import type { ImportMode, ModelProvider, ReasoningEffort } from '../shared/types'
 import { OpenAIService } from './openai-service'
+import { normalizeOllamaBaseUrl, OllamaClient } from './ollama-client'
 import { SecretStore } from './secrets'
 import { createCharacter, createConversation, JsonStore } from './store'
 import { UpdateManager } from './updater'
@@ -123,18 +124,36 @@ function registerIpc(): void {
 
   ipcMain.handle('settings:save', async (_event, rawPatch) => {
     const patch = rawPatch as {
+      modelProvider?: ModelProvider
       model?: string
       reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
       selectedCharacterId?: string
       selectedConversationId?: string
     }
+    if (patch.modelProvider !== undefined && !['openai', 'ollama'].includes(patch.modelProvider)) {
+      throw new Error('生成方法が不正です。')
+    }
     if (patch.model !== undefined) nonEmptyTextSchema.parse(patch.model)
+    if (patch.ollamaBaseUrl !== undefined) patch.ollamaBaseUrl = normalizeOllamaBaseUrl(patch.ollamaBaseUrl)
+    if (patch.ollamaModel !== undefined) {
+      if (typeof patch.ollamaModel !== 'string' || patch.ollamaModel.length > 500) {
+        throw new Error('Ollamaモデル名が不正です。')
+      }
+      patch.ollamaModel = patch.ollamaModel.trim()
+    }
     if (patch.selectedCharacterId !== undefined) uuidSchema.parse(patch.selectedCharacterId)
     if (patch.selectedConversationId !== undefined) uuidSchema.parse(patch.selectedConversationId)
     if (patch.reasoningEffort !== undefined && !['none', 'low', 'medium', 'high'].includes(patch.reasoningEffort)) {
       throw new Error('推論強度が不正です。')
     }
     return store.patchSettings(patch)
+  })
+
+  ipcMain.handle('local-models:list', async (_event, rawBaseUrl) => {
+    if (typeof rawBaseUrl !== 'string') throw new Error('Ollamaの接続先が不正です。')
+    return new OllamaClient(rawBaseUrl).listModels()
   })
 
   ipcMain.handle('secret:set', async (_event, rawApiKey) => {

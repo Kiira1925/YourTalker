@@ -4,6 +4,7 @@ import type {
   CharacterAnalysisMode,
   ChatEvent,
   ImportMode,
+  ModelProvider,
   ReasoningEffort,
   UpdateState,
   YourTalkerApi
@@ -40,11 +41,17 @@ const api: YourTalkerApi = {
   },
   settings: {
     save: (patch: {
+      modelProvider?: ModelProvider
       model?: string
       reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
       selectedCharacterId?: string
       selectedConversationId?: string
     }) => ipcRenderer.invoke('settings:save', patch)
+  },
+  localModels: {
+    list: (baseUrl: string) => ipcRenderer.invoke('local-models:list', baseUrl)
   },
   secret: {
     set: (apiKey: string) => ipcRenderer.invoke('secret:set', apiKey),

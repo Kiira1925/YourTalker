@@ -68,8 +68,11 @@ export const settingsSchema = z.object({
   ...entityBase,
   selectedCharacterId: z.string().uuid().optional(),
   selectedConversationId: z.string().uuid().optional(),
+  modelProvider: z.enum(['openai', 'ollama']).default('openai'),
   model: z.string().min(1),
   reasoningEffort: z.enum(['none', 'low', 'medium', 'high']),
+  ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
+  ollamaModel: z.string().default(''),
   lastBackupDate: z.string().optional()
 })
 

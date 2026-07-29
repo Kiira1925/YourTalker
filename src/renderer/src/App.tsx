@@ -36,6 +36,8 @@ import type {
   Conversation,
   Correction,
   Message,
+  ModelProvider,
+  LocalModel,
   ReasoningEffort,
   UpdateState
 } from '../../shared/types'
@@ -241,10 +243,16 @@ function App() {
 
   async function analyzeDescription() {
     if (!selectedCharacterId || !descriptionText.trim()) return
-    if (!data?.hasApiKey) {
+    if (data?.settings.modelProvider === 'openai' && !data.hasApiKey) {
       setDescriptionOpen(false)
       setSettingsOpen(true)
       setError('紹介文の解析にはOpenAI APIキーを設定してください。')
+      return
+    }
+    if (data?.settings.modelProvider === 'ollama' && !data.settings.ollamaModel.trim()) {
+      setDescriptionOpen(false)
+      setSettingsOpen(true)
+      setError('紹介文の解析に使うOllamaモデルを設定してください。')
       return
     }
     setDescriptionBusy(true)
@@ -291,9 +299,14 @@ function App() {
 
   async function send(content = composer, retryMessageId?: string) {
     if (!content.trim() || activeRequestId) return
-    if (!data?.hasApiKey) {
+    if (data?.settings.modelProvider === 'openai' && !data.hasApiKey) {
       setSettingsOpen(true)
       setError('会話を始めるにはOpenAI APIキーを設定してください。')
+      return
+    }
+    if (data?.settings.modelProvider === 'ollama' && !data.settings.ollamaModel.trim()) {
+      setSettingsOpen(true)
+      setError('会話に使うOllamaモデルを設定してください。')
       return
     }
     try {
@@ -728,7 +741,9 @@ function App() {
               </label>
             </fieldset>
             <p className="api-disclosure">
-              解析時、この紹介文は設定中のOpenAIモデルへ送信されます。
+              {data.settings.modelProvider === 'ollama'
+                ? '解析は端末上のOllamaモデルで行われ、紹介文は外部へ送信されません。'
+                : '解析時、この紹介文は設定中のOpenAIモデルへ送信されます。'}
             </p>
             {descriptionError && (
               <div className="modal-error">
@@ -930,8 +945,13 @@ function SettingsModal({
   installBlocked: boolean
 }) {
   const [apiKey, setApiKey] = useState('')
+  const [provider, setProvider] = useState<ModelProvider>(data.settings.modelProvider)
   const [model, setModel] = useState(data.settings.model)
   const [effort, setEffort] = useState<ReasoningEffort>(data.settings.reasoningEffort)
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(data.settings.ollamaBaseUrl)
+  const [ollamaModel, setOllamaModel] = useState(data.settings.ollamaModel)
+  const [localModels, setLocalModels] = useState<LocalModel[]>([])
+  const [checkingLocal, setCheckingLocal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [localError, setLocalError] = useState<string>()
@@ -940,8 +960,17 @@ function SettingsModal({
     setBusy(true)
     setLocalError(undefined)
     try {
+      if (provider === 'ollama' && !ollamaModel.trim()) {
+        throw new Error('使用するOllamaモデルを選択または入力してください。')
+      }
       if (apiKey.trim()) await window.yourTalker.secret.set(apiKey)
-      const settings = await window.yourTalker.settings.save({ model, reasoningEffort: effort })
+      const settings = await window.yourTalker.settings.save({
+        modelProvider: provider,
+        model,
+        reasoningEffort: effort,
+        ollamaBaseUrl,
+        ollamaModel
+      })
       onChange({ ...data, settings, hasApiKey: data.hasApiKey || Boolean(apiKey.trim()) })
       onToast('設定を保存しました')
       onClose()
@@ -949,6 +978,26 @@ function SettingsModal({
       setLocalError(messageFrom(reason))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function checkLocalModels() {
+    setCheckingLocal(true)
+    setLocalError(undefined)
+    try {
+      const models = await window.yourTalker.localModels.list(ollamaBaseUrl)
+      setLocalModels(models)
+      if (!models.length) {
+        throw new Error('Ollamaにモデルがありません。先にモデルをダウンロードしてください。')
+      }
+      if (!ollamaModel.trim() || !models.some((item) => item.name === ollamaModel)) {
+        setOllamaModel(models[0].name)
+      }
+      onToast(`${models.length}件のローカルモデルを確認しました`)
+    } catch (reason) {
+      setLocalError(messageFrom(reason))
+    } finally {
+      setCheckingLocal(false)
     }
   }
 
@@ -1007,53 +1056,130 @@ function SettingsModal({
           onInstall={applyUpdate}
         />
         <div className="settings-section">
-          <div className="setting-title"><KeyRound size={17} /><div><strong>OpenAI API</strong><small>キーはWindowsの暗号化機能で保護されます</small></div></div>
-          <label>
-            <span>
-              APIキー {data.hasApiKey && <em>設定済み</em>}
-              {data.hasApiKey && (
+          <div className="setting-title"><Bot size={17} /><div><strong>会話の生成方法</strong><small>クラウドAPIと端末内のモデルを切り替えられます</small></div></div>
+          <div className="provider-options">
+            <button
+              type="button"
+              className={provider === 'ollama' ? 'selected' : ''}
+              onClick={() => setProvider('ollama')}
+            >
+              <strong>ローカルLLM</strong>
+              <small>APIキー不要・Ollamaを使用</small>
+            </button>
+            <button
+              type="button"
+              className={provider === 'openai' ? 'selected' : ''}
+              onClick={() => setProvider('openai')}
+            >
+              <strong>OpenAI API</strong>
+              <small>クラウドモデルを使用</small>
+            </button>
+          </div>
+
+          {provider === 'ollama' ? (
+            <div className="provider-panel">
+              <div className="setting-title compact-title">
+                <Bot size={17} />
+                <div><strong>Ollama</strong><small>Windows上で動作するローカルモデルへ接続します</small></div>
+              </div>
+              <label>
+                <span>接続先</span>
+                <input
+                  value={ollamaBaseUrl}
+                  onChange={(event) => setOllamaBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:11434"
+                  autoComplete="off"
+                />
+              </label>
+              <div className="local-model-row">
+                <label>
+                  <span>使用するモデル</span>
+                  <input
+                    list="ollama-models"
+                    value={ollamaModel}
+                    onChange={(event) => setOllamaModel(event.target.value)}
+                    placeholder="例：gemma3:4b"
+                    autoComplete="off"
+                  />
+                  <datalist id="ollama-models">
+                    {localModels.map((item) => <option value={item.name} key={item.name} />)}
+                  </datalist>
+                </label>
                 <button
                   type="button"
-                  className="inline-danger"
-                  onClick={async () => {
-                    if (!window.confirm('保存済みのAPIキーを削除しますか？')) return
-                    await window.yourTalker.secret.remove()
-                    onChange({ ...data, hasApiKey: false })
-                    setApiKey('')
-                    onToast('APIキーを削除しました')
-                  }}
+                  className="secondary local-check"
+                  disabled={checkingLocal}
+                  onClick={() => void checkLocalModels()}
                 >
-                  削除
+                  {checkingLocal ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
+                  接続確認
                 </button>
+              </div>
+              {localModels.length > 0 && (
+                <div className="model-summary">
+                  {localModels.map((item) => (
+                    <span className={item.name === ollamaModel ? 'active' : ''} key={item.name}>
+                      {item.name}{item.parameterSize ? ` · ${item.parameterSize}` : ''}
+                    </span>
+                  ))}
+                </div>
               )}
-            </span>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={data.hasApiKey ? '変更する場合だけ入力' : 'sk-…'}
-              autoComplete="off"
-            />
-          </label>
-          <div className="settings-grid">
-            <label>
-              <span>モデル</span>
-              <select value={model} onChange={(event) => setModel(event.target.value)}>
-                <option value="gpt-5.6-terra">GPT-5.6 Terra — バランス</option>
-                <option value="gpt-5.6-sol">GPT-5.6 Sol — 品質優先</option>
-                <option value="gpt-5.6-luna">GPT-5.6 Luna — コスト優先</option>
-              </select>
-            </label>
-            <label>
-              <span>推論強度</span>
-              <select value={effort} onChange={(event) => setEffort(event.target.value as ReasoningEffort)}>
-                <option value="none">なし — 最速</option>
-                <option value="low">低 — おすすめ</option>
-                <option value="medium">中</option>
-                <option value="high">高 — じっくり</option>
-              </select>
-            </label>
-          </div>
+              <p className="privacy-note">
+                Ollamaをインストールして起動し、モデルがない場合はPowerShellで
+                <code>ollama pull gemma3:4b</code>などを実行してください。
+              </p>
+            </div>
+          ) : (
+            <div className="provider-panel">
+              <div className="setting-title compact-title"><KeyRound size={17} /><div><strong>OpenAI API</strong><small>キーはWindowsの暗号化機能で保護されます</small></div></div>
+              <label>
+                <span>
+                  APIキー {data.hasApiKey && <em>設定済み</em>}
+                  {data.hasApiKey && (
+                    <button
+                      type="button"
+                      className="inline-danger"
+                      onClick={async () => {
+                        if (!window.confirm('保存済みのAPIキーを削除しますか？')) return
+                        await window.yourTalker.secret.remove()
+                        onChange({ ...data, hasApiKey: false })
+                        setApiKey('')
+                        onToast('APIキーを削除しました')
+                      }}
+                    >
+                      削除
+                    </button>
+                  )}
+                </span>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder={data.hasApiKey ? '変更する場合だけ入力' : 'sk-…'}
+                  autoComplete="off"
+                />
+              </label>
+              <div className="settings-grid">
+                <label>
+                  <span>モデル</span>
+                  <select value={model} onChange={(event) => setModel(event.target.value)}>
+                    <option value="gpt-5.6-terra">GPT-5.6 Terra — バランス</option>
+                    <option value="gpt-5.6-sol">GPT-5.6 Sol — 品質優先</option>
+                    <option value="gpt-5.6-luna">GPT-5.6 Luna — コスト優先</option>
+                  </select>
+                </label>
+                <label>
+                  <span>推論強度</span>
+                  <select value={effort} onChange={(event) => setEffort(event.target.value as ReasoningEffort)}>
+                    <option value="none">なし — 最速</option>
+                    <option value="low">低 — おすすめ</option>
+                    <option value="medium">中</option>
+                    <option value="high">高 — じっくり</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
         </div>
         <div className="settings-section">
           <div className="setting-title"><Archive size={17} /><div><strong>保存とバックアップ</strong><small>{data.dataPath}</small></div></div>
@@ -1071,7 +1197,11 @@ function SettingsModal({
             <button onClick={() => void importData('merge')}><Upload size={16} /> データを追加</button>
             <button onClick={() => void importData('replace')}><RotateCcw size={16} /> バックアップから復元</button>
           </div>
-          <p className="privacy-note">APIキーは書き出しデータに含まれません。会話内容は生成時のみOpenAI APIへ送信されます。</p>
+          <p className="privacy-note">
+            {provider === 'ollama'
+              ? 'ローカルLLM利用時、キャラクター設定と会話内容は端末外へ送信されません。'
+              : 'APIキーは書き出しデータに含まれません。会話内容は生成時のみOpenAI APIへ送信されます。'}
+          </p>
         </div>
         {localError && <div className="error-banner static"><CircleAlert size={16} />{localError}</div>}
         <div className="modal-actions">

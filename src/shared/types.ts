@@ -1,6 +1,7 @@
 export const SCHEMA_VERSION = 1
 
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high'
+export type ModelProvider = 'openai' | 'ollama'
 export type ExportKind = 'full' | 'character'
 export type ImportMode = 'merge' | 'replace'
 export type CharacterAnalysisMode = 'overwrite' | 'fill-empty'
@@ -89,9 +90,19 @@ export interface Conversation extends EntityBase {
 export interface AppSettings extends EntityBase {
   selectedCharacterId?: string
   selectedConversationId?: string
+  modelProvider: ModelProvider
   model: string
   reasoningEffort: ReasoningEffort
+  ollamaBaseUrl: string
+  ollamaModel: string
   lastBackupDate?: string
+}
+
+export interface LocalModel {
+  name: string
+  size: number
+  parameterSize?: string
+  quantizationLevel?: string
 }
 
 export interface ExportBundle extends EntityBase {
@@ -150,7 +161,18 @@ export interface YourTalkerApi {
     toggle(characterId: string, correctionId: string, active: boolean): Promise<BootstrapData>
   }
   settings: {
-    save(patch: { model?: string; reasoningEffort?: ReasoningEffort; selectedCharacterId?: string; selectedConversationId?: string }): Promise<AppSettings>
+    save(patch: {
+      modelProvider?: ModelProvider
+      model?: string
+      reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
+      selectedCharacterId?: string
+      selectedConversationId?: string
+    }): Promise<AppSettings>
+  }
+  localModels: {
+    list(baseUrl: string): Promise<LocalModel[]>
   }
   secret: {
     set(apiKey: string): Promise<boolean>

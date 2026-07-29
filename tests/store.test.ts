@@ -73,4 +73,20 @@ describe('JsonStore', () => {
     expect((await reopened.getCharacter(character.id)).learnedGuidance).toBe('- 復旧済み')
     expect((await reopened.getConversation(conversation.id)).title).toBe('復旧会話')
   })
+
+  it('loads settings created before local model support with compatible defaults', async () => {
+    const store = await testStore()
+    const current = await store.getSettings()
+    const legacy = { ...current } as Record<string, unknown>
+    delete legacy.modelProvider
+    delete legacy.ollamaBaseUrl
+    delete legacy.ollamaModel
+    await writeFile(store.settingsPath, JSON.stringify(legacy), 'utf8')
+
+    const migrated = await store.getSettings()
+
+    expect(migrated.modelProvider).toBe('openai')
+    expect(migrated.ollamaBaseUrl).toBe('http://127.0.0.1:11434')
+    expect(migrated.ollamaModel).toBe('')
+  })
 })

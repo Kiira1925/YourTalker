@@ -371,6 +371,21 @@ dd { margin: 3px 0 0; color: #5d6866; font-size: 9px; line-height: 1.55; white-s
 .update-warning { margin: 9px 0 0; color: #9b6b2c; font-size: 8px; }
 .update-actions { display: flex; justify-content: flex-end; margin-top: 11px; }
 .update-actions button { min-height: 34px; }
+.provider-options { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 12px; }
+.provider-options button { text-align: left; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); }
+.provider-options button:hover { border-color: #9fb5b0; }
+.provider-options button.selected { border-color: var(--teal); background: var(--teal-soft); box-shadow: 0 0 0 1px rgba(25,95,90,.08); }
+.provider-options strong { display: block; font-size: 10px; }
+.provider-options small { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; }
+.provider-panel { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.48); }
+.compact-title { margin-bottom: 11px; }
+.local-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.local-model-row label { min-width: 0; }
+.local-check { min-height: 35px; margin-bottom: 0; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.model-summary { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.model-summary span { padding: 4px 7px; border-radius: 8px; background: #e8e7e2; color: var(--muted); font-size: 8px; }
+.model-summary span.active { color: var(--teal); background: var(--teal-soft); font-weight: 700; }
+.privacy-note code { display: inline-block; margin-left: 4px; padding: 1px 4px; border-radius: 4px; background: #e8e7e2; color: var(--ink); font-family: Consolas, monospace; font-size: 8px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .data-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .data-actions button { min-height: 36px; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 9px; background: #fff; padding: 0 10px; font-size: 9px; }

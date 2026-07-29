@@ -11,9 +11,11 @@ import {
   type Conversation,
   type Correction,
   type CorrectionResult,
-  type Message
+  type Message,
+  type AppSettings
 } from '../shared/types'
 import { applyCorrectionState, compileCharacterInstructions, conversationInput } from './domain'
+import { OllamaClient, type OllamaMessage } from './ollama-client'
 import type { SecretStore } from './secrets'
 import type { JsonStore } from './store'
 
@@ -63,6 +65,26 @@ const characterAnalysisKeys = Object.keys(
   characterAnalysisProperties
 ) as Array<keyof CharacterAnalysisResult>
 
+const characterAnalysisJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: characterAnalysisProperties,
+  required: characterAnalysisKeys
+}
+
+const correctionJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    derivedRule: { type: 'string' },
+    learnedGuidance: { type: 'string' },
+    revisedReply: { type: 'string' }
+  },
+  required: ['derivedRule', 'learnedGuidance', 'revisedReply']
+}
+
+type CompletionMessage = { role: 'user' | 'assistant'; content: string }
+
 export class OpenAIService {
   private readonly active = new Map<string, AbortController>()
 
@@ -74,6 +96,100 @@ export class OpenAIService {
 
   private emit(event: ChatEvent): void {
     this.window()?.webContents.send('chat:event', event)
+  }
+
+  private requireOllamaModel(settings: AppSettings): string {
+    const model = settings.ollamaModel.trim()
+    if (!model) throw new Error('使用するOllamaモデルを設定してください。')
+    return model
+  }
+
+  private async complete(
+    settings: AppSettings,
+    instructions: string,
+    input: CompletionMessage[],
+    options: {
+      effort?: 'none' | 'low' | 'medium' | 'high'
+      schema?: Record<string, unknown>
+      schemaName?: string
+    } = {}
+  ): Promise<string> {
+    if (settings.modelProvider === 'ollama') {
+      const localInstructions = options.schema
+        ? [
+            instructions,
+            '次のJSON Schemaに一致するJSONだけを返してください。説明文やMarkdownは付けないでください。',
+            JSON.stringify(options.schema)
+          ].join('\n\n')
+        : instructions
+      return new OllamaClient(settings.ollamaBaseUrl).chat({
+        model: this.requireOllamaModel(settings),
+        messages: [{ role: 'system', content: localInstructions }, ...input] satisfies OllamaMessage[],
+        format: options.schema
+      })
+    }
+
+    const client = new OpenAI({ apiKey: await this.secrets.get() })
+    const response = await client.responses.create({
+      model: settings.model,
+      reasoning: { effort: options.effort ?? settings.reasoningEffort },
+      instructions,
+      input,
+      ...(options.schema
+        ? {
+            text: {
+              format: {
+                type: 'json_schema' as const,
+                name: options.schemaName ?? 'structured_response',
+                strict: true,
+                schema: options.schema
+              }
+            }
+          }
+        : {}),
+      safety_identifier: settings.id,
+      store: false
+    })
+    return response.output_text
+  }
+
+  private async streamCompletion(
+    settings: AppSettings,
+    instructions: string,
+    input: CompletionMessage[],
+    signal: AbortSignal,
+    onDelta: (delta: string) => void
+  ): Promise<string> {
+    if (settings.modelProvider === 'ollama') {
+      return new OllamaClient(settings.ollamaBaseUrl).streamChat({
+        model: this.requireOllamaModel(settings),
+        messages: [{ role: 'system', content: instructions }, ...input] satisfies OllamaMessage[],
+        signal,
+        onDelta
+      })
+    }
+
+    const client = new OpenAI({ apiKey: await this.secrets.get() })
+    const stream = await client.responses.create(
+      {
+        model: settings.model,
+        reasoning: { effort: settings.reasoningEffort },
+        instructions,
+        input,
+        safety_identifier: settings.id,
+        store: false,
+        stream: true
+      },
+      { signal }
+    )
+    let content = ''
+    for await (const event of stream) {
+      if (event.type === 'response.output_text.delta') {
+        content += event.delta
+        onDelta(event.delta)
+      }
+    }
+    return content
   }
 
   async startChat(conversationId: string, content: string, retryMessageId?: string): Promise<string> {
@@ -116,16 +232,13 @@ export class OpenAIService {
     mode: CharacterAnalysisMode
   ): Promise<CharacterProfile> {
     try {
-      const [character, settings, apiKey] = await Promise.all([
+      const [character, settings] = await Promise.all([
         this.store.getCharacter(characterId),
-        this.store.getSettings(),
-        this.secrets.get()
+        this.store.getSettings()
       ])
-      const client = new OpenAI({ apiKey })
-      const response = await client.responses.create({
-        model: settings.model,
-        reasoning: { effort: 'low' },
-        instructions: [
+      const output = await this.complete(
+        settings,
+        [
           'あなたはキャラクター紹介文を、会話AI用のキャラクター設定へ整理する編集者です。',
           '紹介文に明記された内容、または文脈から強く判断できる内容だけを抽出してください。',
           '情報がない項目は空文字にし、設定を創作・補完しないでください。',
@@ -133,27 +246,17 @@ export class OpenAIService {
           'overviewは人物像を短く要約し、その他の項目は会話生成に役立つ具体的な表現にしてください。',
           'sampleDialogueには紹介文中の台詞や、明確に示された話し方の例だけを入れてください。'
         ].join('\n'),
-        input: [{ role: 'user', content: description }],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'character_profile_analysis',
-            strict: true,
-            schema: {
-              type: 'object',
-              additionalProperties: false,
-              properties: characterAnalysisProperties,
-              required: characterAnalysisKeys
-            }
-          }
-        },
-        safety_identifier: settings.id,
-        store: false
-      })
+        [{ role: 'user', content: description }],
+        {
+          effort: 'low',
+          schema: characterAnalysisJsonSchema,
+          schemaName: 'character_profile_analysis'
+        }
+      )
 
       let analysis: CharacterAnalysisResult
       try {
-        analysis = characterAnalysisResultSchema.parse(JSON.parse(response.output_text))
+        analysis = characterAnalysisResultSchema.parse(JSON.parse(output))
       } catch {
         throw new Error('紹介文を設定項目へ正しく整理できませんでした。もう一度お試しください。')
       }
@@ -181,32 +284,18 @@ export class OpenAIService {
     controller: AbortController
   ): Promise<void> {
     try {
-      const [character, settings, apiKey] = await Promise.all([
+      const [character, settings] = await Promise.all([
         this.store.getCharacter(conversation.characterId),
-        this.store.getSettings(),
-        this.secrets.get()
+        this.store.getSettings()
       ])
-      const client = new OpenAI({ apiKey })
-      const stream = await client.responses.create(
-        {
-          model: settings.model,
-          reasoning: { effort: settings.reasoningEffort },
-          instructions: compileCharacterInstructions(character),
-          input: conversationInput(conversation),
-          safety_identifier: settings.id,
-          store: false,
-          stream: true
-        },
-        { signal: controller.signal }
+      const content = await this.streamCompletion(
+        settings,
+        compileCharacterInstructions(character),
+        conversationInput(conversation),
+        controller.signal,
+        (delta) => this.emit({ type: 'delta', requestId, delta })
       )
 
-      let content = ''
-      for await (const event of stream) {
-        if (event.type === 'response.output_text.delta') {
-          content += event.delta
-          this.emit({ type: 'delta', requestId, delta: event.delta })
-        }
-      }
       if (!content.trim()) throw new Error('空の応答が返されました。')
 
       const fresh = await this.store.getConversation(conversation.id)
@@ -217,7 +306,7 @@ export class OpenAIService {
         updatedAt: timestamp()
       })
       this.emit({ type: 'completed', requestId, conversation: completed })
-      void this.summarizeIfNeeded(completed, character, client)
+      void this.summarizeIfNeeded(completed, character)
     } catch (error) {
       const fresh = await this.store.getConversation(conversation.id)
       const failed = await this.store.saveConversation({
@@ -239,8 +328,7 @@ export class OpenAIService {
 
   private async summarizeIfNeeded(
     conversation: Conversation,
-    character: CharacterProfile,
-    client: OpenAI
+    character: CharacterProfile
   ): Promise<void> {
     if (conversation.messages.length < 50) return
     const olderMessages = conversation.messages.slice(0, -30)
@@ -248,12 +336,10 @@ export class OpenAIService {
     if (!lastIncluded || conversation.summaryThroughMessageId === lastIncluded.id) return
     try {
       const settings = await this.store.getSettings()
-      const response = await client.responses.create({
-        model: settings.model,
-        reasoning: { effort: 'low' },
-        instructions:
-          '会話継続用の簡潔な日本語要約を作成してください。関係性、出来事、約束、感情の変化、固有名詞を残し、話し方の模倣は不要です。',
-        input: [
+      const summary = await this.complete(
+        settings,
+        '会話継続用の簡潔な日本語要約を作成してください。関係性、出来事、約束、感情の変化、固有名詞を残し、話し方の模倣は不要です。',
+        [
           ...(conversation.summary
             ? [{ role: 'user' as const, content: `既存の要約:\n${conversation.summary}` }]
             : []),
@@ -262,13 +348,12 @@ export class OpenAIService {
             content: olderMessages.map((message) => `${message.role === 'user' ? 'ユーザー' : character.name}: ${message.content}`).join('\n')
           }
         ],
-        safety_identifier: settings.id,
-        store: false
-      })
+        { effort: 'low' }
+      )
       const current = await this.store.getConversation(conversation.id)
       await this.store.saveConversation({
         ...current,
-        summary: response.output_text.trim(),
+        summary: summary.trim(),
         summaryThroughMessageId: lastIncluded.id,
         updatedAt: timestamp()
       })
@@ -282,9 +367,8 @@ export class OpenAIService {
     const character = await this.store.getCharacter(conversation.characterId)
     const message = conversation.messages.find((item) => item.id === messageId && item.role === 'assistant')
     if (!message) throw new Error('修正対象の返答が見つかりません。')
-    const [settings, apiKey] = await Promise.all([this.store.getSettings(), this.secrets.get()])
-    const client = new OpenAI({ apiKey })
-    const result = await this.generateCorrection(client, settings.model, settings.id, character, conversation, message, feedback)
+    const settings = await this.store.getSettings()
+    const result = await this.generateCorrection(settings, character, conversation, message, feedback)
     const createdAt = timestamp()
     const correction: Correction = {
       id: randomUUID(),
@@ -333,23 +417,20 @@ export class OpenAIService {
   }
 
   private async generateCorrection(
-    client: OpenAI,
-    model: string,
-    safetyIdentifier: string,
+    settings: AppSettings,
     character: CharacterProfile,
     conversation: Conversation,
     message: Message,
     feedback: string
   ): Promise<CorrectionResult> {
-    const response = await client.responses.create({
-      model,
-      reasoning: { effort: 'low' },
-      instructions: [
+    const output = await this.complete(
+      settings,
+      [
         'キャラクター会話へのユーザー指摘を、今後も適用できる簡潔なルールへ変換してください。',
         'learnedGuidanceには既存ルールを保ちつつ新ルールを統合してください。',
         'revisedReplyは指摘を反映し、会話の流れとキャラクター設定に沿った返答だけを書いてください。'
       ].join('\n'),
-      input: [
+      [
         {
           role: 'user',
           content: [
@@ -360,28 +441,10 @@ export class OpenAIService {
           ].join('\n\n')
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'character_correction',
-          strict: true,
-          schema: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              derivedRule: { type: 'string' },
-              learnedGuidance: { type: 'string' },
-              revisedReply: { type: 'string' }
-            },
-            required: ['derivedRule', 'learnedGuidance', 'revisedReply']
-          }
-        }
-      },
-      safety_identifier: safetyIdentifier,
-      store: false
-    })
+      { effort: 'low', schema: correctionJsonSchema, schemaName: 'character_correction' }
+    )
     try {
-      return correctionResultSchema.parse(JSON.parse(response.output_text))
+      return correctionResultSchema.parse(JSON.parse(output))
     } catch {
       throw new Error('指摘内容を正しく構造化できませんでした。もう一度お試しください。')
     }

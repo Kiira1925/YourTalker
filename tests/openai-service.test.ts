@@ -27,6 +27,7 @@ const directories: string[] = []
 
 beforeEach(() => mocks.create.mockReset())
 afterEach(async () => {
+  vi.unstubAllGlobals()
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
@@ -45,7 +46,7 @@ async function fixture() {
   } as unknown as BrowserWindow
   const secrets = { get: vi.fn().mockResolvedValue('sk-test') }
   const service = new OpenAIService(store, secrets as never, () => window)
-  return { store, character, conversation, events, service }
+  return { store, character, conversation, events, secrets, service }
 }
 
 async function* textStream(...parts: string[]) {
@@ -208,5 +209,87 @@ describe('OpenAIService', () => {
       active: true
     })
     expect(correctedConversation.messages[1].content).toContain('もうへばったの？')
+  })
+
+  it('uses Ollama for structured analysis and streaming without reading the API key', async () => {
+    const { store, character, conversation, events, secrets, service } = await fixture()
+    await store.patchSettings({
+      modelProvider: 'ollama',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      ollamaModel: 'gemma3:4b'
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          message: {
+            role: 'assistant',
+            content: JSON.stringify(
+              analysisResult({
+                name: '宵',
+                overview: '月面都市の古書店主',
+                personality: '静かで面倒見がよい'
+              })
+            )
+          },
+          done: true
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          [
+            JSON.stringify({ message: { role: 'assistant', content: 'おかえり。' }, done: false }),
+            JSON.stringify({ message: { role: 'assistant', content: '今日はどうしたの？' }, done: true })
+          ].join('\n'),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          message: {
+            role: 'assistant',
+            content: JSON.stringify({
+              derivedRule: '親しい場面では短く気遣う',
+              learnedGuidance: '- 親しい場面では短く気遣う',
+              revisedReply: 'おかえり。疲れてない？'
+            })
+          },
+          done: true
+        })
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const analyzed = await service.analyzeCharacterDescription(
+      character.id,
+      '宵は月面都市で古書店を営む。',
+      'overwrite'
+    )
+    expect(analyzed.overview).toBe('月面都市の古書店主')
+
+    await service.startChat(conversation.id, 'ただいま')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+
+    expect(secrets.get).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+    const structuredRequest = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(structuredRequest).toMatchObject({
+      model: 'gemma3:4b',
+      stream: false,
+      think: false
+    })
+    expect(structuredRequest.format.required).toContain('name')
+    const streamRequest = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(streamRequest.stream).toBe(true)
+    expect(streamRequest.messages[0].role).toBe('system')
+
+    const withReply = await store.getConversation(conversation.id)
+    await service.applyCorrection(conversation.id, withReply.messages[1].id, 'もっと短く気遣って')
+    expect((await store.getConversation(conversation.id)).messages[1].content).toBe('おかえり。疲れてない？')
+    const correctionRequest = JSON.parse(fetchMock.mock.calls[2][1].body)
+    expect(correctionRequest.format.required).toEqual([
+      'derivedRule',
+      'learnedGuidance',
+      'revisedReply'
+    ])
   })
 })
