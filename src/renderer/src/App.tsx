@@ -30,6 +30,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BootstrapData,
+  CharacterAnalysisMode,
   CharacterProfile,
   ChatEvent,
   Conversation,
@@ -91,6 +92,11 @@ function App() {
   const [activeRequestId, setActiveRequestId] = useState<string>()
   const [error, setError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [descriptionOpen, setDescriptionOpen] = useState(false)
+  const [descriptionText, setDescriptionText] = useState('')
+  const [descriptionMode, setDescriptionMode] = useState<CharacterAnalysisMode>('overwrite')
+  const [descriptionBusy, setDescriptionBusy] = useState(false)
+  const [descriptionError, setDescriptionError] = useState<string>()
   const [correctionMessage, setCorrectionMessage] = useState<Message | null>(null)
   const [correctionFeedback, setCorrectionFeedback] = useState('')
   const [correctionBusy, setCorrectionBusy] = useState(false)
@@ -230,6 +236,56 @@ function App() {
       setSelectedConversationId(conversation.id)
     } catch (reason) {
       setError(messageFrom(reason))
+    }
+  }
+
+  async function analyzeDescription() {
+    if (!selectedCharacterId || !descriptionText.trim()) return
+    if (!data?.hasApiKey) {
+      setDescriptionOpen(false)
+      setSettingsOpen(true)
+      setError('紹介文の解析にはOpenAI APIキーを設定してください。')
+      return
+    }
+    setDescriptionBusy(true)
+    setDescriptionError(undefined)
+    try {
+      if (draft && draftDirty) {
+        const savedDraft = await window.yourTalker.character.save(draft)
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                characters: current.characters.map((item) =>
+                  item.id === savedDraft.id ? savedDraft : item
+                )
+              }
+            : current
+        )
+        setDraftDirty(false)
+      }
+      const saved = await window.yourTalker.character.analyzeDescription(
+        selectedCharacterId,
+        descriptionText,
+        descriptionMode
+      )
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              characters: current.characters.map((item) => (item.id === saved.id ? saved : item))
+            }
+          : current
+      )
+      setDraft(structuredClone(saved))
+      setDraftDirty(false)
+      setDescriptionText('')
+      setDescriptionOpen(false)
+      setToast('紹介文からキャラクター設定を反映しました')
+    } catch (reason) {
+      setDescriptionError(messageFrom(reason))
+    } finally {
+      setDescriptionBusy(false)
     }
   }
 
@@ -547,6 +603,22 @@ function App() {
                   <p>空欄のままでも大丈夫。会話しながら育てられます。</p>
                 </div>
               </div>
+              <div className="description-import-card">
+                <span><Sparkles size={17} /></span>
+                <div>
+                  <strong>紹介文から自動設定</strong>
+                  <small>まとまった文章をAIが項目ごとに整理します。</small>
+                </div>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setDescriptionError(undefined)
+                    setDescriptionOpen(true)
+                  }}
+                >
+                  文章を解析
+                </button>
+              </div>
               {profileFields.map((field) => (
                 <label className={field.compact ? 'compact-field' : ''} key={field.key}>
                   <span>{field.label}</span>
@@ -592,6 +664,97 @@ function App() {
           onInstallUpdate={installUpdate}
           installBlocked={Boolean(activeRequestId)}
         />
+      )}
+
+      {descriptionOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => !descriptionBusy && setDescriptionOpen(false)}
+        >
+          <section
+            className="modal description-modal"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              disabled={descriptionBusy}
+              onClick={() => setDescriptionOpen(false)}
+            >
+              <X size={18} />
+            </button>
+            <span className="modal-icon"><Sparkles size={20} /></span>
+            <h2>紹介文からキャラクターを設定</h2>
+            <p className="modal-lead">
+              プロフィール、設定資料、あらすじなどを貼り付けると、各項目へ整理して保存します。
+            </p>
+            <label>
+              <span>キャラクター紹介文</span>
+              <textarea
+                autoFocus
+                rows={11}
+                value={descriptionText}
+                disabled={descriptionBusy}
+                onChange={(event) => setDescriptionText(event.target.value)}
+                placeholder="例：宵は月面都市で古書店を営む、無口だが面倒見のよい青年。ユーザーとは幼なじみで、「きみ」と呼ぶ。普段は短く穏やかに話し、驚くと『まいったな』が口癖として出る……"
+              />
+            </label>
+            <fieldset className="description-modes" disabled={descriptionBusy}>
+              <legend>既存設定への反映方法</legend>
+              <label className={descriptionMode === 'overwrite' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="description-mode"
+                  value="overwrite"
+                  checked={descriptionMode === 'overwrite'}
+                  onChange={() => setDescriptionMode('overwrite')}
+                />
+                <span>
+                  <strong>読み取れた項目を上書き</strong>
+                  <small>紹介文に情報がある項目だけ更新し、不明な項目は残します。</small>
+                </span>
+              </label>
+              <label className={descriptionMode === 'fill-empty' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="description-mode"
+                  value="fill-empty"
+                  checked={descriptionMode === 'fill-empty'}
+                  onChange={() => setDescriptionMode('fill-empty')}
+                />
+                <span>
+                  <strong>空欄だけ補完</strong>
+                  <small>すでに入力済みの項目を変更せず、空欄だけ埋めます。</small>
+                </span>
+              </label>
+            </fieldset>
+            <p className="api-disclosure">
+              解析時、この紹介文は設定中のOpenAIモデルへ送信されます。
+            </p>
+            {descriptionError && (
+              <div className="modal-error">
+                <CircleAlert size={15} />
+                {descriptionError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                className="secondary"
+                disabled={descriptionBusy}
+                onClick={() => setDescriptionOpen(false)}
+              >
+                キャンセル
+              </button>
+              <button
+                className="primary"
+                disabled={!descriptionText.trim() || descriptionBusy}
+                onClick={() => void analyzeDescription()}
+              >
+                {descriptionBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                {descriptionBusy ? '解析しています…' : '解析して反映'}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
 
       {correctionMessage && (

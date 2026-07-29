@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import OpenAI from 'openai'
 import type { BrowserWindow } from 'electron'
-import { correctionResultSchema } from '../shared/schemas'
+import { characterAnalysisResultSchema, correctionResultSchema } from '../shared/schemas'
 import {
   SCHEMA_VERSION,
+  type CharacterAnalysisMode,
+  type CharacterAnalysisResult,
   type CharacterProfile,
   type ChatEvent,
   type Conversation,
@@ -40,6 +42,26 @@ function friendlyError(error: unknown): string {
   if (error instanceof Error) return error.message
   return '予期しないエラーが発生しました。'
 }
+
+const characterAnalysisProperties = {
+  name: { type: 'string', description: 'キャラクターの名前' },
+  callingName: { type: 'string', description: 'キャラクターがユーザーを呼ぶときの呼称' },
+  overview: { type: 'string', description: 'キャラクター像を短くまとめた概要' },
+  personality: { type: 'string', description: '性格、感情傾向、対人態度' },
+  values: { type: 'string', description: '大切にする価値観、判断基準、信念' },
+  world: { type: 'string', description: '背景、経歴、時代、場所、所属する世界観' },
+  relationship: { type: 'string', description: 'キャラクターとユーザーの関係' },
+  speechStyle: { type: 'string', description: '語尾、敬語、テンポ、文量などの話し方' },
+  catchphrases: { type: 'string', description: '紹介文に示された口癖や特徴的な言い回し' },
+  likes: { type: 'string', description: '好き嫌い、趣味、得意不得意' },
+  taboos: { type: 'string', description: '避ける話題、言動、表現、してはいけないこと' },
+  sampleDialogue: { type: 'string', description: '紹介文中の台詞や明確な会話例' },
+  notes: { type: 'string', description: '他の項目に当てはまらない重要な補足' }
+} satisfies Record<keyof CharacterAnalysisResult, { type: 'string'; description: string }>
+
+const characterAnalysisKeys = Object.keys(
+  characterAnalysisProperties
+) as Array<keyof CharacterAnalysisResult>
 
 export class OpenAIService {
   private readonly active = new Map<string, AbortController>()
@@ -86,6 +108,70 @@ export class OpenAIService {
 
   cancel(requestId: string): void {
     this.active.get(requestId)?.abort()
+  }
+
+  async analyzeCharacterDescription(
+    characterId: string,
+    description: string,
+    mode: CharacterAnalysisMode
+  ): Promise<CharacterProfile> {
+    try {
+      const [character, settings, apiKey] = await Promise.all([
+        this.store.getCharacter(characterId),
+        this.store.getSettings(),
+        this.secrets.get()
+      ])
+      const client = new OpenAI({ apiKey })
+      const response = await client.responses.create({
+        model: settings.model,
+        reasoning: { effort: 'low' },
+        instructions: [
+          'あなたはキャラクター紹介文を、会話AI用のキャラクター設定へ整理する編集者です。',
+          '紹介文に明記された内容、または文脈から強く判断できる内容だけを抽出してください。',
+          '情報がない項目は空文字にし、設定を創作・補完しないでください。',
+          'callingNameはキャラクターがユーザーをどう呼ぶかです。キャラクター自身の別名ではありません。',
+          'overviewは人物像を短く要約し、その他の項目は会話生成に役立つ具体的な表現にしてください。',
+          'sampleDialogueには紹介文中の台詞や、明確に示された話し方の例だけを入れてください。'
+        ].join('\n'),
+        input: [{ role: 'user', content: description }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'character_profile_analysis',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: characterAnalysisProperties,
+              required: characterAnalysisKeys
+            }
+          }
+        },
+        safety_identifier: settings.id,
+        store: false
+      })
+
+      let analysis: CharacterAnalysisResult
+      try {
+        analysis = characterAnalysisResultSchema.parse(JSON.parse(response.output_text))
+      } catch {
+        throw new Error('紹介文を設定項目へ正しく整理できませんでした。もう一度お試しください。')
+      }
+      if (!characterAnalysisKeys.some((key) => analysis[key].trim())) {
+        throw new Error('紹介文から設定に使える内容を読み取れませんでした。文章を追加してお試しください。')
+      }
+
+      const next: CharacterProfile = { ...character, updatedAt: timestamp() }
+      for (const key of characterAnalysisKeys) {
+        const value = analysis[key].trim()
+        if (!value) continue
+        if (mode === 'fill-empty' && character[key].trim()) continue
+        next[key] = value
+      }
+      return this.store.saveCharacter(next)
+    } catch (error) {
+      throw new Error(friendlyError(error))
+    }
   }
 
   private async runChat(

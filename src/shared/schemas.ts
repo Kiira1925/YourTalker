@@ -19,9 +19,8 @@ export const correctionSchema = z.object({
   active: z.boolean()
 })
 
-export const characterSchema = z.object({
-  ...entityBase,
-  name: z.string().min(1),
+const characterAnalysisFields = {
+  name: z.string(),
   callingName: z.string(),
   overview: z.string(),
   personality: z.string(),
@@ -33,7 +32,15 @@ export const characterSchema = z.object({
   likes: z.string(),
   taboos: z.string(),
   sampleDialogue: z.string(),
-  notes: z.string(),
+  notes: z.string()
+}
+
+export const characterAnalysisResultSchema = z.object(characterAnalysisFields)
+
+export const characterSchema = z.object({
+  ...entityBase,
+  ...characterAnalysisFields,
+  name: z.string().min(1),
   learnedGuidance: z.string(),
   corrections: z.array(correctionSchema)
 })

@@ -3,6 +3,7 @@ export const SCHEMA_VERSION = 1
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high'
 export type ExportKind = 'full' | 'character'
 export type ImportMode = 'merge' | 'replace'
+export type CharacterAnalysisMode = 'overwrite' | 'fill-empty'
 export type UpdateStatus =
   | 'disabled'
   | 'idle'
@@ -45,7 +46,7 @@ export interface Correction extends EntityBase {
   active: boolean
 }
 
-export interface CharacterProfile extends EntityBase {
+export interface CharacterAnalysisResult {
   name: string
   callingName: string
   overview: string
@@ -59,6 +60,9 @@ export interface CharacterProfile extends EntityBase {
   taboos: string
   sampleDialogue: string
   notes: string
+}
+
+export interface CharacterProfile extends EntityBase, CharacterAnalysisResult {
   learnedGuidance: string
   corrections: Correction[]
 }
@@ -125,6 +129,11 @@ export interface YourTalkerApi {
   character: {
     create(): Promise<CharacterProfile>
     save(character: CharacterProfile): Promise<CharacterProfile>
+    analyzeDescription(
+      characterId: string,
+      description: string,
+      mode: CharacterAnalysisMode
+    ): Promise<CharacterProfile>
     remove(characterId: string): Promise<BootstrapData>
   }
   conversation: {
