@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { CharacterProfile, Conversation, Correction, Message } from '../src/shared/types'
-import { applyCorrectionState, compileCharacterInstructions, rebuildLearnedGuidance } from '../src/main/domain'
+import {
+  applyCorrectionState,
+  compileCharacterInstructions,
+  conversationInput,
+  rebuildLearnedGuidance
+} from '../src/main/domain'
 import { createCharacter, createConversation } from '../src/main/store'
 
 describe('character domain', () => {
@@ -16,6 +21,10 @@ describe('character domain', () => {
     expect(instructions).toContain('あなたは「宵」')
     expect(instructions).toContain('短めのため口')
     expect(instructions).toContain('軽い冗談')
+    expect(instructions).toContain('必ず守る優先順位')
+    expect(instructions.indexOf('会話から学習した最優先ルール')).toBeLessThan(
+      instructions.indexOf('キャラクター設定')
+    )
   })
 
   it('rebuilds guidance from active corrections only', () => {
@@ -41,6 +50,21 @@ describe('character domain', () => {
 
     expect(rebuildLearnedGuidance([first, merged])).toBe(`- ${merged.derivedRule}`)
     expect(rebuildLearnedGuidance([first, { ...merged, active: false }])).toBe(`- ${first.derivedRule}`)
+  })
+
+  it('keeps the newest message within a local context character budget', () => {
+    const conversation = createConversation(crypto.randomUUID())
+    conversation.messages = [
+      message('user', '古い内容'.repeat(100)),
+      message('assistant', '途中の内容'.repeat(100)),
+      message('user', `最新の質問${'長文'.repeat(500)}`)
+    ]
+
+    const input = conversationInput(conversation, 30, 120)
+
+    expect(input).toHaveLength(1)
+    expect(input[0].content).toContain('最新の質問')
+    expect(input[0].content.length).toBeLessThanOrEqual(120)
   })
 
   it('disables a correction without deleting its audit record', () => {

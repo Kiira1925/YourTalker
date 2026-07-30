@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CharacterAnalysisResult, ChatEvent } from '../src/shared/types'
+import type { CharacterAnalysisResult, ChatEvent, Message } from '../src/shared/types'
 
 const mocks = vi.hoisted(() => ({ create: vi.fn() }))
 
@@ -299,6 +299,24 @@ describe('OpenAIService', () => {
           message: {
             role: 'assistant',
             content: JSON.stringify({
+              checks: [
+                { requirementId: 'speech-style', satisfied: false, issue: '丁寧すぎる' },
+                { requirementId: 'personality', satisfied: true, issue: '' },
+                { requirementId: 'overview', satisfied: true, issue: '' },
+                { requirementId: 'identity', satisfied: true, issue: '' },
+                { requirementId: 'conversation-flow', satisfied: true, issue: '' }
+              ],
+              revisedReply: 'おかえり。疲れてない？'
+            })
+          },
+          done: true
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          message: {
+            role: 'assistant',
+            content: JSON.stringify({
               derivedRule: '親しい場面では短く気遣う',
               learnedGuidance: '- 親しい場面では短く気遣う',
               revisedReply: 'おかえり。疲れてない？',
@@ -332,16 +350,156 @@ describe('OpenAIService', () => {
     const streamRequest = JSON.parse(fetchMock.mock.calls[1][1].body)
     expect(streamRequest.stream).toBe(true)
     expect(streamRequest.messages[0].role).toBe('system')
+    expect(streamRequest.options).toMatchObject({
+      temperature: 0.35,
+      top_p: 0.9,
+      num_ctx: 8192
+    })
 
     const withReply = await store.getConversation(conversation.id)
+    expect(withReply.messages[1].content).toBe('おかえり。疲れてない？')
+    expect(events.some((event) => event.type === 'reviewing')).toBe(true)
+    const reviewRequest = JSON.parse(fetchMock.mock.calls[2][1].body)
+    expect(reviewRequest.format.required).toEqual(['checks', 'revisedReply'])
+    expect(reviewRequest.options.temperature).toBe(0)
+    expect(reviewRequest.messages[0].content).toContain('上位要件に上書きされた下位要件は非適用')
+
     await service.applyCorrection(conversation.id, withReply.messages[1].id, 'もっと短く気遣って')
     expect((await store.getConversation(conversation.id)).messages[1].content).toBe('おかえり。疲れてない？')
-    const correctionRequest = JSON.parse(fetchMock.mock.calls[2][1].body)
+    const correctionRequest = JSON.parse(fetchMock.mock.calls[3][1].body)
     expect(correctionRequest.format.required).toEqual([
       'derivedRule',
       'learnedGuidance',
       'revisedReply',
       'mergeWithCorrectionIds'
     ])
+  })
+
+  it('can skip local rule review when the accuracy option is disabled', async () => {
+    const { store, conversation, events, service } = await fixture()
+    await store.patchSettings({
+      modelProvider: 'ollama',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      ollamaModel: 'gemma3:4b',
+      ollamaRuleReview: false
+    })
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ message: { role: 'assistant', content: 'そのままの返答' }, done: true }),
+        { status: 200 }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await service.startChat(conversation.id, '話して')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(events.some((event) => event.type === 'reviewing')).toBe(false)
+    expect((await store.getConversation(conversation.id)).messages[1].content).toBe('そのままの返答')
+  })
+
+  it('retries an invalid local review and warns before keeping the draft', async () => {
+    const { store, conversation, events, service } = await fixture()
+    await store.patchSettings({
+      modelProvider: 'ollama',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      ollamaModel: 'gemma3:4b',
+      ollamaRuleReview: true
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ message: { role: 'assistant', content: '照合前の返答' }, done: true }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(Response.json({ message: { role: 'assistant', content: '{}' }, done: true }))
+      .mockResolvedValueOnce(Response.json({ message: { role: 'assistant', content: '{}' }, done: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await service.startChat(conversation.id, '話して')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(events.some((event) => event.type === 'review-warning')).toBe(true)
+    expect((await store.getConversation(conversation.id)).messages[1].content).toBe('照合前の返答')
+  })
+
+  it('cancels safely while a local rule review is running', async () => {
+    const { store, conversation, events, service } = await fixture()
+    await store.patchSettings({
+      modelProvider: 'ollama',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      ollamaModel: 'gemma3:4b',
+      ollamaRuleReview: true
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ message: { role: 'assistant', content: '照合待ちの返答' }, done: true }),
+          { status: 200 }
+        )
+      )
+      .mockImplementationOnce((_url, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          )
+        })
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const requestId = await service.startChat(conversation.id, '話して')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'reviewing')).toBe(true))
+    service.cancel(requestId)
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'cancelled')).toBe(true))
+
+    const saved = await store.getConversation(conversation.id)
+    expect(saved.messages).toHaveLength(1)
+    expect(saved.messages[0].status).toBe('failed')
+  })
+
+  it('summarizes only messages added after the previous summary boundary', async () => {
+    const { store, conversation, events, service } = await fixture()
+    const createdAt = new Date().toISOString()
+    const history: Message[] = Array.from({ length: 49 }, (_, index) => ({
+      id: crypto.randomUUID(),
+      schemaVersion: 1,
+      createdAt,
+      updatedAt: createdAt,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `履歴-${index}`,
+      status: 'complete'
+    }))
+    history[19].status = 'failed'
+    await store.saveConversation({
+      ...conversation,
+      messages: history,
+      summary: '履歴-0から履歴-17までの既存要約',
+      summaryThroughMessageId: history[17].id
+    })
+    mocks.create
+      .mockResolvedValueOnce(textStream('新しい返答'))
+      .mockResolvedValueOnce({ output_text: '更新された要約' })
+
+    await service.startChat(conversation.id, '新しい質問')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+    await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
+
+    const summaryInput = mocks.create.mock.calls[1][0].input.at(-1).content
+    expect(summaryInput).toContain('履歴-18')
+    expect(summaryInput).toContain('履歴-20')
+    expect(summaryInput).not.toContain('履歴-19')
+    expect(summaryInput).not.toContain('履歴-17\n')
+    expect(summaryInput).not.toContain('履歴-0\n')
+    await vi.waitFor(async () =>
+      expect((await store.getConversation(conversation.id)).summary).toBe('更新された要約')
+    )
+    expect((await store.getConversation(conversation.id)).summaryThroughMessageId).toBe(history[20].id)
   })
 })

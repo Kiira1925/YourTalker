@@ -12,6 +12,13 @@ interface OllamaChatChunk {
   error?: string
 }
 
+export interface OllamaGenerationOptions {
+  temperature?: number
+  top_p?: number
+  num_ctx?: number
+  num_predict?: number
+}
+
 export function normalizeOllamaBaseUrl(raw: string): string {
   let url: URL
   try {
@@ -71,7 +78,13 @@ export class OllamaClient {
     messages: OllamaMessage[]
     format?: Record<string, unknown>
     signal?: AbortSignal
+    generationOptions?: OllamaGenerationOptions
+    think?: boolean | 'low' | 'medium' | 'high'
   }): Promise<string> {
+    const generationOptions = {
+      ...(options.format ? { temperature: 0 } : {}),
+      ...options.generationOptions
+    }
     const response = await this.fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -79,8 +92,9 @@ export class OllamaClient {
         model: options.model,
         messages: options.messages,
         stream: false,
-        think: false,
-        ...(options.format ? { format: options.format, options: { temperature: 0 } } : {})
+        ...(options.think !== undefined ? { think: options.think } : {}),
+        ...(options.format ? { format: options.format } : {}),
+        ...(Object.keys(generationOptions).length > 0 ? { options: generationOptions } : {})
       }),
       signal: options.signal
     })
@@ -96,6 +110,7 @@ export class OllamaClient {
     messages: OllamaMessage[]
     signal: AbortSignal
     onDelta: (delta: string) => void
+    generationOptions?: OllamaGenerationOptions
   }): Promise<string> {
     const response = await this.fetch('/api/chat', {
       method: 'POST',
@@ -104,7 +119,8 @@ export class OllamaClient {
         model: options.model,
         messages: options.messages,
         stream: true,
-        think: false
+        think: false,
+        ...(options.generationOptions ? { options: options.generationOptions } : {})
       }),
       signal: options.signal
     })

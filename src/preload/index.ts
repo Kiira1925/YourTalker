@@ -46,6 +46,7 @@ const api: YourTalkerApi = {
       reasoningEffort?: ReasoningEffort
       ollamaBaseUrl?: string
       ollamaModel?: string
+      ollamaRuleReview?: boolean
       selectedCharacterId?: string
       selectedConversationId?: string
     }) => ipcRenderer.invoke('settings:save', patch)

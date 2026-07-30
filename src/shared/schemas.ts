@@ -74,6 +74,7 @@ export const settingsSchema = z.object({
   reasoningEffort: z.enum(['none', 'low', 'medium', 'high']),
   ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
   ollamaModel: z.string().default(''),
+  ollamaRuleReview: z.boolean().default(true),
   lastBackupDate: z.string().optional()
 })
 

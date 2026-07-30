@@ -129,6 +129,7 @@ function registerIpc(): void {
       reasoningEffort?: ReasoningEffort
       ollamaBaseUrl?: string
       ollamaModel?: string
+      ollamaRuleReview?: boolean
       selectedCharacterId?: string
       selectedConversationId?: string
     }
@@ -142,6 +143,9 @@ function registerIpc(): void {
         throw new Error('Ollamaモデル名が不正です。')
       }
       patch.ollamaModel = patch.ollamaModel.trim()
+    }
+    if (patch.ollamaRuleReview !== undefined && typeof patch.ollamaRuleReview !== 'boolean') {
+      throw new Error('ローカルルール確認設定が不正です。')
     }
     if (patch.selectedCharacterId !== undefined) uuidSchema.parse(patch.selectedCharacterId)
     if (patch.selectedConversationId !== undefined) uuidSchema.parse(patch.selectedConversationId)

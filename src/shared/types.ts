@@ -96,6 +96,7 @@ export interface AppSettings extends EntityBase {
   reasoningEffort: ReasoningEffort
   ollamaBaseUrl: string
   ollamaModel: string
+  ollamaRuleReview: boolean
   lastBackupDate?: string
 }
 
@@ -133,6 +134,8 @@ export interface CorrectionResult {
 export type ChatEvent =
   | { type: 'accepted'; requestId: string; conversation: Conversation }
   | { type: 'delta'; requestId: string; delta: string }
+  | { type: 'reviewing'; requestId: string }
+  | { type: 'review-warning'; requestId: string; message: string }
   | { type: 'completed'; requestId: string; conversation: Conversation }
   | { type: 'cancelled'; requestId: string; conversation: Conversation }
   | { type: 'error'; requestId: string; message: string; conversation: Conversation }
@@ -169,6 +172,7 @@ export interface YourTalkerApi {
       reasoningEffort?: ReasoningEffort
       ollamaBaseUrl?: string
       ollamaModel?: string
+      ollamaRuleReview?: boolean
       selectedCharacterId?: string
       selectedConversationId?: string
     }): Promise<AppSettings>

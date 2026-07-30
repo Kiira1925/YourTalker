@@ -92,6 +92,7 @@ function App() {
   const [composer, setComposer] = useState('')
   const [streamText, setStreamText] = useState('')
   const [activeRequestId, setActiveRequestId] = useState<string>()
+  const [reviewingReply, setReviewingReply] = useState(false)
   const [error, setError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [descriptionOpen, setDescriptionOpen] = useState(false)
@@ -119,6 +120,14 @@ function App() {
         setStreamText((current) => current + event.delta)
         return
       }
+      if (event.type === 'reviewing') {
+        setReviewingReply(true)
+        return
+      }
+      if (event.type === 'review-warning') {
+        setToast(event.message)
+        return
+      }
       setData((current) =>
         current
           ? {
@@ -132,9 +141,11 @@ function App() {
       )
       if (event.type === 'accepted') {
         setActiveRequestId(event.requestId)
+        setReviewingReply(false)
         setError(undefined)
       } else {
         setActiveRequestId(undefined)
+        setReviewingReply(false)
         setStreamText('')
         if (event.type === 'error') setError(event.message)
         if (event.type === 'cancelled') setToast('生成を中止しました')
@@ -322,6 +333,7 @@ function App() {
       }
       setComposer('')
       setStreamText('')
+      setReviewingReply(false)
       setError(undefined)
       const result = await window.yourTalker.chat.send(conversationId, content, retryMessageId)
       setActiveRequestId(result.requestId)
@@ -546,6 +558,9 @@ function App() {
                   <span className="message-avatar">{selectedCharacter.name.slice(0, 1)}</span>
                   <div className="bubble">
                     <p>{streamText}<span className="stream-caret" /></p>
+                    {reviewingReply && (
+                      <small className="review-status"><Sparkles size={11} /> ルールとの整合性を確認中…</small>
+                    )}
                   </div>
                 </div>
               )}
@@ -980,6 +995,7 @@ function SettingsModal({
   const [effort, setEffort] = useState<ReasoningEffort>(data.settings.reasoningEffort)
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(data.settings.ollamaBaseUrl)
   const [ollamaModel, setOllamaModel] = useState(data.settings.ollamaModel)
+  const [ollamaRuleReview, setOllamaRuleReview] = useState(data.settings.ollamaRuleReview)
   const [localModels, setLocalModels] = useState<LocalModel[]>([])
   const [checkingLocal, setCheckingLocal] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -999,7 +1015,8 @@ function SettingsModal({
         model,
         reasoningEffort: effort,
         ollamaBaseUrl,
-        ollamaModel
+        ollamaModel,
+        ollamaRuleReview
       })
       onChange({ ...data, settings, hasApiKey: data.hasApiKey || Boolean(apiKey.trim()) })
       onToast('設定を保存しました')
@@ -1154,6 +1171,17 @@ function SettingsModal({
                   ))}
                 </div>
               )}
+              <label className="quality-toggle">
+                <input
+                  type="checkbox"
+                  checked={ollamaRuleReview}
+                  onChange={(event) => setOllamaRuleReview(event.target.checked)}
+                />
+                <span>
+                  <strong>返答をルール照合して自動修正</strong>
+                  <small>追加の確認処理で完了まで長くなりますが、キャラクター設定や学習ルールからのズレを抑えます</small>
+                </span>
+              </label>
               <p className="privacy-note">
                 Ollamaをインストールして起動し、モデルがない場合はPowerShellで
                 <code>ollama pull gemma3:4b</code>などを実行してください。

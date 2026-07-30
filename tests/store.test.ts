@@ -140,6 +140,7 @@ describe('JsonStore', () => {
     delete legacy.modelProvider
     delete legacy.ollamaBaseUrl
     delete legacy.ollamaModel
+    delete legacy.ollamaRuleReview
     await writeFile(store.settingsPath, JSON.stringify(legacy), 'utf8')
 
     const migrated = await store.getSettings()
@@ -147,5 +148,6 @@ describe('JsonStore', () => {
     expect(migrated.modelProvider).toBe('openai')
     expect(migrated.ollamaBaseUrl).toBe('http://127.0.0.1:11434')
     expect(migrated.ollamaModel).toBe('')
+    expect(migrated.ollamaRuleReview).toBe(true)
   })
 })

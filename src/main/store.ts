@@ -81,7 +81,8 @@ function createSettings(): AppSettings {
     model: 'gpt-5.6-terra',
     reasoningEffort: 'low',
     ollamaBaseUrl: 'http://127.0.0.1:11434',
-    ollamaModel: ''
+    ollamaModel: '',
+    ollamaRuleReview: true
   }
 }
 
