@@ -33,10 +33,25 @@ export function compileCharacterInstructions(character: CharacterProfile): strin
   ].join('\n')
 }
 
+export function activeRuleCorrections(corrections: Correction[]): Correction[] {
+  const newestActiveByGroup = new Map<string, Correction>()
+  for (const correction of corrections) {
+    if (!correction.active) continue
+    const groupId = correction.ruleGroupId ?? correction.id
+    const current = newestActiveByGroup.get(groupId)
+    if (
+      !current ||
+      correction.createdAt.localeCompare(current.createdAt) > 0 ||
+      (correction.createdAt === current.createdAt && correction.id.localeCompare(current.id) > 0)
+    ) {
+      newestActiveByGroup.set(groupId, correction)
+    }
+  }
+  return [...newestActiveByGroup.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
 export function rebuildLearnedGuidance(corrections: Correction[]): string {
-  const rules = corrections
-    .filter((correction) => correction.active)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const rules = activeRuleCorrections(corrections)
     .map((correction) => `- ${correction.derivedRule.trim()}`)
   return rules.join('\n')
 }

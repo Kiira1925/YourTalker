@@ -196,7 +196,8 @@ describe('OpenAIService', () => {
       output_text: JSON.stringify({
         derivedRule: '親しい場面では敬語を避け、少し茶化してから気遣う',
         learnedGuidance: '- 親しい場面では敬語を避け、少し茶化してから気遣う',
-        revisedReply: 'もうへばったの？ しょうがないな、少し休みなよ。'
+        revisedReply: 'もうへばったの？ しょうがないな、少し休みなよ。',
+        mergeWithCorrectionIds: []
       })
     })
     await service.applyCorrection(conversation.id, assistant.id, 'もっと親しく、少し茶化す感じで')
@@ -209,6 +210,55 @@ describe('OpenAIService', () => {
       active: true
     })
     expect(correctedConversation.messages[1].content).toContain('もうへばったの？')
+  })
+
+  it('merges similar corrections into one learned rule and falls back when disabled', async () => {
+    const { store, character, conversation, events, service } = await fixture()
+    mocks.create
+      .mockResolvedValueOnce(textStream('無理せず休んでください。'))
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          derivedRule: '親しい場面では敬語を避けて気遣う',
+          learnedGuidance: '- 親しい場面では敬語を避けて気遣う',
+          revisedReply: '無理しないで休みなよ。',
+          mergeWithCorrectionIds: []
+        })
+      })
+
+    await service.startChat(conversation.id, '疲れた')
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+    let savedConversation = await store.getConversation(conversation.id)
+    await service.applyCorrection(conversation.id, savedConversation.messages[1].id, '敬語じゃなく気遣って')
+
+    const firstCorrection = (await store.getCharacter(character.id)).corrections[0]
+    mocks.create
+      .mockResolvedValueOnce(textStream('お疲れさまです。'))
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          derivedRule: '親しい場面では敬語を避け、短く軽口を交えて気遣う',
+          learnedGuidance: '- 親しい場面では敬語を避け、短く軽口を交えて気遣う',
+          revisedReply: 'またへばったの？ 今日はもう休みなよ。',
+          mergeWithCorrectionIds: [firstCorrection.id]
+        })
+      })
+
+    await service.startChat(conversation.id, '今日も疲れた')
+    await vi.waitFor(async () =>
+      expect((await store.getConversation(conversation.id)).messages).toHaveLength(4)
+    )
+    savedConversation = await store.getConversation(conversation.id)
+    await service.applyCorrection(conversation.id, savedConversation.messages[3].id, '短い軽口も入れて')
+
+    let savedCharacter = await store.getCharacter(character.id)
+    expect(savedCharacter.corrections).toHaveLength(2)
+    expect(savedCharacter.corrections[0].ruleGroupId).toBe(savedCharacter.corrections[1].ruleGroupId)
+    expect(savedCharacter.learnedGuidance).toBe(
+      '- 親しい場面では敬語を避け、短く軽口を交えて気遣う'
+    )
+
+    await service.toggleCorrection(character.id, savedCharacter.corrections[1].id, false)
+    savedCharacter = await store.getCharacter(character.id)
+    expect(savedCharacter.learnedGuidance).toBe('- 親しい場面では敬語を避けて気遣う')
   })
 
   it('uses Ollama for structured analysis and streaming without reading the API key', async () => {
@@ -251,7 +301,8 @@ describe('OpenAIService', () => {
             content: JSON.stringify({
               derivedRule: '親しい場面では短く気遣う',
               learnedGuidance: '- 親しい場面では短く気遣う',
-              revisedReply: 'おかえり。疲れてない？'
+              revisedReply: 'おかえり。疲れてない？',
+              mergeWithCorrectionIds: []
             })
           },
           done: true
@@ -289,7 +340,8 @@ describe('OpenAIService', () => {
     expect(correctionRequest.format.required).toEqual([
       'derivedRule',
       'learnedGuidance',
-      'revisedReply'
+      'revisedReply',
+      'mergeWithCorrectionIds'
     ])
   })
 })

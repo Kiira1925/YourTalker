@@ -40,6 +40,7 @@ export interface EntityBase {
 export interface Correction extends EntityBase {
   conversationId: string
   messageId: string
+  ruleGroupId?: string
   feedbackText: string
   derivedRule: string
   originalReply: string
@@ -126,6 +127,7 @@ export interface CorrectionResult {
   derivedRule: string
   learnedGuidance: string
   revisedReply: string
+  mergeWithCorrectionIds: string[]
 }
 
 export type ChatEvent =

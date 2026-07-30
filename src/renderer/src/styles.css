@@ -305,8 +305,15 @@ input::placeholder, textarea::placeholder { color: #afb5b2; }
 .toggle i { display: block; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .toggle.on { background: var(--teal); }
 .toggle.on i { transform: translateX(13px); }
+.toggle.compact { flex: 0 0 auto; transform: scale(.86); transform-origin: right center; }
 details { margin-top: 9px; border-top: 1px solid #eeece6; padding-top: 7px; }
 summary { color: var(--muted); font-size: 9px; }
+.correction-history { margin-top: 9px; padding: 9px; border-radius: 8px; background: var(--panel); }
+.correction-history + .correction-history { margin-top: 6px; }
+.memory-card .correction-history > header { margin-bottom: 3px; }
+.correction-history b { color: var(--teal); font-size: 8px; letter-spacing: .06em; }
+.correction-history dl { margin-top: 3px; }
+.correction-history time { display: block; color: var(--faint); font-size: 8px; margin-top: 8px; }
 dl { margin: 9px 0 0; }
 dt { color: var(--coral); font-size: 8px; font-weight: 700; margin-top: 8px; }
 dd { margin: 3px 0 0; color: #5d6866; font-size: 9px; line-height: 1.55; white-space: pre-wrap; }

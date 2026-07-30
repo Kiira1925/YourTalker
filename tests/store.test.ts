@@ -49,6 +49,65 @@ describe('JsonStore', () => {
     expect((await destination.listConversations()).map((item) => item.title)).toContain('残したい会話')
   })
 
+  it('keeps merged rule groups connected when IDs are remapped during import', async () => {
+    const source = await testStore()
+    const character = { ...createCharacter(), name: '統合ルール付き' }
+    const conversation = createConversation(character.id)
+    const createdAt = new Date().toISOString()
+    const firstMessageId = crypto.randomUUID()
+    const secondMessageId = crypto.randomUUID()
+    const firstCorrectionId = crypto.randomUUID()
+    const secondCorrectionId = crypto.randomUUID()
+    conversation.messages = [firstMessageId, secondMessageId].map((id) => ({
+      id,
+      schemaVersion: 1,
+      createdAt,
+      updatedAt: createdAt,
+      role: 'assistant' as const,
+      content: '修正版'
+    }))
+    character.corrections = [
+      {
+        id: firstCorrectionId,
+        schemaVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        conversationId: conversation.id,
+        messageId: firstMessageId,
+        ruleGroupId: firstCorrectionId,
+        feedbackText: '敬語を避けて',
+        derivedRule: '親しい場面では敬語を避ける',
+        originalReply: '元返答1',
+        revisedReply: '修正版1',
+        active: true
+      },
+      {
+        id: secondCorrectionId,
+        schemaVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        conversationId: conversation.id,
+        messageId: secondMessageId,
+        ruleGroupId: firstCorrectionId,
+        feedbackText: '軽口も入れて',
+        derivedRule: '親しい場面では敬語を避け、軽口を交える',
+        originalReply: '元返答2',
+        revisedReply: '修正版2',
+        active: true
+      }
+    ]
+    await source.saveCharacter(character)
+    await source.saveConversation(conversation)
+
+    const destination = await testStore()
+    await destination.importBundle(await source.createExport(), 'merge')
+    const imported = (await destination.listCharacters()).find((item) => item.name === '統合ルール付き')!
+
+    expect(imported.corrections[0].id).not.toBe(firstCorrectionId)
+    expect(imported.corrections[0].ruleGroupId).toBe(imported.corrections[0].id)
+    expect(imported.corrections[1].ruleGroupId).toBe(imported.corrections[0].id)
+  })
+
   it('restores a valid sidecar when the primary JSON is corrupted', async () => {
     const store = await testStore()
     const character = await store.saveCharacter({ ...createCharacter(), name: '初期名' })

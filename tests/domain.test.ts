@@ -24,6 +24,25 @@ describe('character domain', () => {
     expect(rebuildLearnedGuidance([base, disabled])).toBe(`- ${base.derivedRule}`)
   })
 
+  it('uses only the newest active correction from each merged rule group', () => {
+    const groupId = crypto.randomUUID()
+    const first = {
+      ...correction(),
+      ruleGroupId: groupId,
+      derivedRule: '親しい場面では敬語を避ける',
+      createdAt: '2026-01-01T00:00:00.000Z'
+    }
+    const merged = {
+      ...correction(),
+      ruleGroupId: groupId,
+      derivedRule: '親しい場面では敬語を避け、軽口を交えて気遣う',
+      createdAt: '2026-01-02T00:00:00.000Z'
+    }
+
+    expect(rebuildLearnedGuidance([first, merged])).toBe(`- ${merged.derivedRule}`)
+    expect(rebuildLearnedGuidance([first, { ...merged, active: false }])).toBe(`- ${first.derivedRule}`)
+  })
+
   it('disables a correction without deleting its audit record', () => {
     const character = createCharacter()
     const conversation = createConversation(character.id)

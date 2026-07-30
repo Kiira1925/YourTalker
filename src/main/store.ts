@@ -392,6 +392,9 @@ function remapBundle(bundle: ExportBundle): ExportBundle {
     corrections: character.corrections.map((correction) => ({
       ...correction,
       id: correctionIds.get(correction.id)!,
+      ruleGroupId: correction.ruleGroupId
+        ? correctionIds.get(correction.ruleGroupId) ?? correctionIds.get(correction.id)!
+        : undefined,
       conversationId: conversationIds.get(correction.conversationId)!,
       messageId: messageIds.get(correction.messageId)!,
       createdAt: timestamp,

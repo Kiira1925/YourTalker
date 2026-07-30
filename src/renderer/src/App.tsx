@@ -871,7 +871,17 @@ function MemoryPanel({
   character: CharacterProfile
   onToggle: (correction: Correction) => void
 }) {
-  const activeCount = character.corrections.filter((item) => item.active).length
+  const groupedCorrections = new Map<string, Correction[]>()
+  for (const correction of character.corrections) {
+    const groupId = correction.ruleGroupId ?? correction.id
+    const group = groupedCorrections.get(groupId) ?? []
+    group.push(correction)
+    groupedCorrections.set(groupId, group)
+  }
+  const ruleGroups = [...groupedCorrections.values()]
+    .map((corrections) => corrections.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    .sort((a, b) => b[0].createdAt.localeCompare(a[0].createdAt))
+  const activeCount = ruleGroups.filter((group) => group.some((item) => item.active)).length
   return (
     <div className="memory-panel">
       <div className="memory-summary">
@@ -888,33 +898,53 @@ function MemoryPanel({
         </div>
       )}
       <div className="memory-list">
-        {character.corrections
-          .slice()
-          .reverse()
-          .map((correction, index) => (
-            <article className={`memory-card ${correction.active ? '' : 'inactive'}`} key={correction.id}>
+        {ruleGroups.map((group, index) => {
+          const current = group.find((correction) => correction.active) ?? group[0]
+          const groupActive = group.some((correction) => correction.active)
+          return (
+            <article className={`memory-card ${groupActive ? '' : 'inactive'}`} key={current.ruleGroupId ?? current.id}>
               <header>
-                <span>RULE {character.corrections.length - index}</span>
+                <span>
+                  RULE {ruleGroups.length - index}
+                  {group.length > 1 && ` · ${group.length}件を統合`}
+                </span>
                 <button
-                  className={`toggle ${correction.active ? 'on' : ''}`}
-                  onClick={() => void onToggle(correction)}
-                  aria-label={correction.active ? 'ルールを無効にする' : 'ルールを有効にする'}
+                  className={`toggle ${current.active ? 'on' : ''}`}
+                  onClick={() => void onToggle(current)}
+                  aria-label={current.active ? '最新の指摘を無効にする' : '最新の指摘を有効にする'}
                 >
                   <i />
                 </button>
               </header>
-              <strong>{correction.derivedRule}</strong>
+              <strong>{current.derivedRule}</strong>
               <details>
-                <summary>指摘と修正履歴を見る</summary>
-                <dl>
-                  <dt>指摘</dt><dd>{correction.feedbackText}</dd>
-                  <dt>元の返答</dt><dd>{correction.originalReply}</dd>
-                  <dt>修正版</dt><dd>{correction.revisedReply}</dd>
-                </dl>
+                <summary>{group.length > 1 ? `${group.length}件の統合履歴を見る` : '指摘と修正履歴を見る'}</summary>
+                {group.map((correction, historyIndex) => (
+                  <section className="correction-history" key={correction.id}>
+                    <header>
+                      <b>指摘 {group.length - historyIndex}</b>
+                      <button
+                        className={`toggle compact ${correction.active ? 'on' : ''}`}
+                        onClick={() => void onToggle(correction)}
+                        aria-label={correction.active ? 'この指摘を無効にする' : 'この指摘を有効にする'}
+                      >
+                        <i />
+                      </button>
+                    </header>
+                    <dl>
+                      <dt>ルール</dt><dd>{correction.derivedRule}</dd>
+                      <dt>指摘</dt><dd>{correction.feedbackText}</dd>
+                      <dt>元の返答</dt><dd>{correction.originalReply}</dd>
+                      <dt>修正版</dt><dd>{correction.revisedReply}</dd>
+                    </dl>
+                    <time>{new Date(correction.createdAt).toLocaleString('ja-JP')}</time>
+                  </section>
+                ))}
               </details>
-              <time>{new Date(correction.createdAt).toLocaleString('ja-JP')}</time>
+              <time>{new Date(current.createdAt).toLocaleString('ja-JP')}</time>
             </article>
-          ))}
+          )
+        })}
         {character.corrections.length === 0 && (
           <div className="empty-memory">
             <BookOpen size={28} />

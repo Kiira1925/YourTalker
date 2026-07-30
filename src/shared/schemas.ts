@@ -12,6 +12,7 @@ export const correctionSchema = z.object({
   ...entityBase,
   conversationId: z.string().uuid(),
   messageId: z.string().uuid(),
+  ruleGroupId: z.string().uuid().optional(),
   feedbackText: z.string().min(1),
   derivedRule: z.string().min(1),
   originalReply: z.string(),
@@ -90,7 +91,8 @@ export const exportBundleSchema = z.object({
 export const correctionResultSchema = z.object({
   derivedRule: z.string().min(1),
   learnedGuidance: z.string(),
-  revisedReply: z.string().min(1)
+  revisedReply: z.string().min(1),
+  mergeWithCorrectionIds: z.array(z.string().uuid())
 })
 
 export const nonEmptyTextSchema = z.string().trim().min(1).max(20_000)

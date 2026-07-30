@@ -14,7 +14,13 @@ import {
   type Message,
   type AppSettings
 } from '../shared/types'
-import { applyCorrectionState, compileCharacterInstructions, conversationInput } from './domain'
+import {
+  activeRuleCorrections,
+  applyCorrectionState,
+  compileCharacterInstructions,
+  conversationInput,
+  rebuildLearnedGuidance
+} from './domain'
 import { OllamaClient, type OllamaMessage } from './ollama-client'
 import type { SecretStore } from './secrets'
 import type { JsonStore } from './store'
@@ -78,12 +84,24 @@ const correctionJsonSchema = {
   properties: {
     derivedRule: { type: 'string' },
     learnedGuidance: { type: 'string' },
-    revisedReply: { type: 'string' }
+    revisedReply: { type: 'string' },
+    mergeWithCorrectionIds: {
+      type: 'array',
+      items: { type: 'string' }
+    }
   },
-  required: ['derivedRule', 'learnedGuidance', 'revisedReply']
+  required: ['derivedRule', 'learnedGuidance', 'revisedReply', 'mergeWithCorrectionIds']
 }
 
 type CompletionMessage = { role: 'user' | 'assistant'; content: string }
+
+function formatMergeCandidates(corrections: Correction[]): string {
+  const activeRules = activeRuleCorrections(corrections)
+  if (activeRules.length === 0) return 'なし'
+  return activeRules
+    .map((correction) => `${correction.id}: ${correction.derivedRule.trim()}`)
+    .join('\n')
+}
 
 export class OpenAIService {
   private readonly active = new Map<string, AbortController>()
@@ -370,23 +388,39 @@ export class OpenAIService {
     const settings = await this.store.getSettings()
     const result = await this.generateCorrection(settings, character, conversation, message, feedback)
     const createdAt = timestamp()
+    const correctionId = randomUUID()
+    const requestedMergeIds = new Set(result.mergeWithCorrectionIds)
+    const mergeTargets = character.corrections.filter(
+      (item) => item.active && requestedMergeIds.has(item.id)
+    )
+    const mergedGroupIds = new Set(
+      mergeTargets.map((item) => item.ruleGroupId ?? item.id)
+    )
+    const ruleGroupId = mergeTargets[0]?.ruleGroupId ?? mergeTargets[0]?.id ?? correctionId
     const correction: Correction = {
-      id: randomUUID(),
+      id: correctionId,
       schemaVersion: SCHEMA_VERSION,
       createdAt,
       updatedAt: createdAt,
       conversationId,
       messageId,
+      ruleGroupId,
       feedbackText: feedback,
       derivedRule: result.derivedRule,
       originalReply: message.content,
       revisedReply: result.revisedReply,
       active: true
     }
+    const existingCorrections = character.corrections.map((item) =>
+      mergedGroupIds.has(item.ruleGroupId ?? item.id)
+        ? { ...item, ruleGroupId, updatedAt: createdAt }
+        : item
+    )
+    const corrections = [...existingCorrections, correction]
     const nextCharacter: CharacterProfile = {
       ...character,
-      corrections: [...character.corrections, correction],
-      learnedGuidance: result.learnedGuidance,
+      corrections,
+      learnedGuidance: rebuildLearnedGuidance(corrections),
       updatedAt: createdAt
     }
     const nextConversation: Conversation = {
@@ -427,7 +461,10 @@ export class OpenAIService {
       settings,
       [
         'キャラクター会話へのユーザー指摘を、今後も適用できる簡潔なルールへ変換してください。',
-        'learnedGuidanceには既存ルールを保ちつつ新ルールを統合してください。',
+        '既存ルール一覧のうち、新しい指摘と意味・目的・適用場面が近いものは統合してください。',
+        '統合する場合、derivedRuleには既存ルールと新しい指摘の重要な内容を落とさず、一つの簡潔なルールとして書いてください。',
+        'mergeWithCorrectionIdsには統合対象のIDだけを入れてください。近くないルールは統合せず、該当しない場合は空配列にしてください。',
+        'learnedGuidanceには統合後のルール一覧全文を書いてください。',
         'revisedReplyは指摘を反映し、会話の流れとキャラクター設定に沿った返答だけを書いてください。'
       ].join('\n'),
       [
@@ -435,6 +472,7 @@ export class OpenAIService {
           role: 'user',
           content: [
             `キャラクター設定:\n${compileCharacterInstructions(character)}`,
+            `既存ルール一覧（IDはmergeWithCorrectionIdsへの指定専用）:\n${formatMergeCandidates(character.corrections)}`,
             `直前までの会話:\n${conversation.messages.slice(-10).map((item) => `${item.role}: ${item.content}`).join('\n')}`,
             `修正対象:\n${message.content}`,
             `ユーザーの指摘:\n${feedback}`
