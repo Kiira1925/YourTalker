@@ -1,14 +1,16 @@
 import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
 import log from 'electron-log/main'
+import { z } from 'zod'
 import {
   characterSchema,
   nonEmptyTextSchema,
   uuidSchema
 } from '../shared/schemas'
-import type { ImportMode, ReasoningEffort } from '../shared/types'
+import type { ImportMode, ModelProvider, ReasoningEffort } from '../shared/types'
 import { OpenAIService } from './openai-service'
+import { normalizeOllamaBaseUrl, OllamaClient } from './ollama-client'
 import { SecretStore } from './secrets'
 import { createCharacter, createConversation, JsonStore } from './store'
 import { UpdateManager } from './updater'
@@ -18,6 +20,31 @@ let store: JsonStore
 let secrets: SecretStore
 let openai: OpenAIService
 let updates: UpdateManager
+
+const MAX_AVATAR_SOURCE_BYTES = 15 * 1024 * 1024
+const MAX_AVATAR_DIMENSION = 384
+
+async function loadAvatarDataUrl(path: string): Promise<string> {
+  const sourceStat = await stat(path)
+  if (sourceStat.size > MAX_AVATAR_SOURCE_BYTES) {
+    throw new Error('アイコン画像は15MB以下のものを選んでください。')
+  }
+  const source = nativeImage.createFromPath(path)
+  if (source.isEmpty()) throw new Error('画像を読み込めませんでした。PNG、JPEG、WebP画像を選んでください。')
+  const size = source.getSize()
+  if (size.width <= 0 || size.height <= 0) throw new Error('画像のサイズを確認できませんでした。')
+  const scale = Math.min(1, MAX_AVATAR_DIMENSION / Math.max(size.width, size.height))
+  const image = scale < 1
+    ? source.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'best'
+      })
+    : source
+  const png = image.toPNG()
+  if (png.length === 0) throw new Error('画像をPNGへ変換できませんでした。')
+  return `data:image/png;base64,${png.toString('base64')}`
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -69,7 +96,30 @@ function registerIpc(): void {
     await store.patchSettings({ selectedCharacterId: character.id, selectedConversationId: undefined })
     return character
   })
-  ipcMain.handle('character:save', async (_event, raw) => store.saveCharacter(characterSchema.parse(raw)))
+  ipcMain.handle('character:save', async (_event, raw) => {
+    const incoming = characterSchema.parse(raw)
+    const current = await store.getCharacter(incoming.id)
+    return store.saveCharacter({ ...incoming, avatarDataUrl: current.avatarDataUrl })
+  })
+  ipcMain.handle('character:select-avatar', async (_event, rawId) => {
+    const id = uuidSchema.parse(rawId)
+    const character = await store.getCharacter(id)
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: `${character.name}のアイコン画像を選択`,
+      properties: ['openFile'],
+      filters: [
+        { name: '画像', extensions: ['png', 'jpg', 'jpeg', 'webp'] }
+      ]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const avatarDataUrl = await loadAvatarDataUrl(result.filePaths[0])
+    return store.saveCharacter({ ...character, avatarDataUrl })
+  })
+  ipcMain.handle('character:clear-avatar', async (_event, rawId) => {
+    const character = await store.getCharacter(uuidSchema.parse(rawId))
+    const { avatarDataUrl: _avatarDataUrl, ...withoutAvatar } = character
+    return store.saveCharacter(withoutAvatar)
+  })
   ipcMain.handle('character:analyze-description', async (_event, rawId, rawDescription, rawMode) => {
     const mode = rawMode as 'overwrite' | 'fill-empty'
     if (!['overwrite', 'fill-empty'].includes(mode)) throw new Error('反映方法が不正です。')
@@ -99,11 +149,18 @@ function registerIpc(): void {
     return bootstrap()
   })
 
-  ipcMain.handle('chat:send', async (_event, rawConversationId, rawContent, rawRetryMessageId) => {
+  ipcMain.handle('chat:send', async (
+    _event,
+    rawConversationId,
+    rawContent,
+    rawInputKind,
+    rawRetryMessageId
+  ) => {
     const conversationId = uuidSchema.parse(rawConversationId)
     const content = nonEmptyTextSchema.parse(rawContent)
+    const inputKind = z.enum(['dialogue', 'narration']).parse(rawInputKind)
     const retryMessageId = rawRetryMessageId ? uuidSchema.parse(rawRetryMessageId) : undefined
-    return { requestId: await openai.startChat(conversationId, content, retryMessageId) }
+    return { requestId: await openai.startChat(conversationId, content, retryMessageId, inputKind) }
   })
   ipcMain.handle('chat:cancel', (_event, rawRequestId) => openai.cancel(uuidSchema.parse(rawRequestId)))
 
@@ -123,18 +180,40 @@ function registerIpc(): void {
 
   ipcMain.handle('settings:save', async (_event, rawPatch) => {
     const patch = rawPatch as {
+      modelProvider?: ModelProvider
       model?: string
       reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
+      ollamaRuleReview?: boolean
       selectedCharacterId?: string
       selectedConversationId?: string
     }
+    if (patch.modelProvider !== undefined && !['openai', 'ollama'].includes(patch.modelProvider)) {
+      throw new Error('生成方法が不正です。')
+    }
     if (patch.model !== undefined) nonEmptyTextSchema.parse(patch.model)
+    if (patch.ollamaBaseUrl !== undefined) patch.ollamaBaseUrl = normalizeOllamaBaseUrl(patch.ollamaBaseUrl)
+    if (patch.ollamaModel !== undefined) {
+      if (typeof patch.ollamaModel !== 'string' || patch.ollamaModel.length > 500) {
+        throw new Error('Ollamaモデル名が不正です。')
+      }
+      patch.ollamaModel = patch.ollamaModel.trim()
+    }
+    if (patch.ollamaRuleReview !== undefined && typeof patch.ollamaRuleReview !== 'boolean') {
+      throw new Error('ローカルルール確認設定が不正です。')
+    }
     if (patch.selectedCharacterId !== undefined) uuidSchema.parse(patch.selectedCharacterId)
     if (patch.selectedConversationId !== undefined) uuidSchema.parse(patch.selectedConversationId)
     if (patch.reasoningEffort !== undefined && !['none', 'low', 'medium', 'high'].includes(patch.reasoningEffort)) {
       throw new Error('推論強度が不正です。')
     }
     return store.patchSettings(patch)
+  })
+
+  ipcMain.handle('local-models:list', async (_event, rawBaseUrl) => {
+    if (typeof rawBaseUrl !== 'string') throw new Error('Ollamaの接続先が不正です。')
+    return new OllamaClient(rawBaseUrl).listModels()
   })
 
   ipcMain.handle('secret:set', async (_event, rawApiKey) => {

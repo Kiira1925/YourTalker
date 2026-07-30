@@ -1,9 +1,11 @@
 export const SCHEMA_VERSION = 1
 
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high'
+export type ModelProvider = 'openai' | 'ollama'
 export type ExportKind = 'full' | 'character'
 export type ImportMode = 'merge' | 'replace'
 export type CharacterAnalysisMode = 'overwrite' | 'fill-empty'
+export type UserInputKind = 'dialogue' | 'narration'
 export type UpdateStatus =
   | 'disabled'
   | 'idle'
@@ -39,6 +41,7 @@ export interface EntityBase {
 export interface Correction extends EntityBase {
   conversationId: string
   messageId: string
+  ruleGroupId?: string
   feedbackText: string
   derivedRule: string
   originalReply: string
@@ -48,12 +51,29 @@ export interface Correction extends EntityBase {
 
 export interface CharacterAnalysisResult {
   name: string
+  age: string
+  gender: string
+  species: string
+  occupation: string
+  appearance: string
   callingName: string
   overview: string
   personality: string
   values: string
+  goals: string
+  abilities: string
+  weaknesses: string
+  fears: string
   world: string
+  history: string
+  affiliations: string
+  secrets: string
   relationship: string
+  behaviorStyle: string
+  habits: string
+  emotionalExpression: string
+  firstPerson: string
+  addressingOthers: string
   speechStyle: string
   catchphrases: string
   likes: string
@@ -63,6 +83,7 @@ export interface CharacterAnalysisResult {
 }
 
 export interface CharacterProfile extends EntityBase, CharacterAnalysisResult {
+  avatarDataUrl?: string
   learnedGuidance: string
   corrections: Correction[]
 }
@@ -72,6 +93,7 @@ export type MessageRole = 'user' | 'assistant'
 export interface Message extends EntityBase {
   role: MessageRole
   content: string
+  inputKind?: UserInputKind
   originalContent?: string
   correctionId?: string
   status?: 'complete' | 'failed'
@@ -89,9 +111,20 @@ export interface Conversation extends EntityBase {
 export interface AppSettings extends EntityBase {
   selectedCharacterId?: string
   selectedConversationId?: string
+  modelProvider: ModelProvider
   model: string
   reasoningEffort: ReasoningEffort
+  ollamaBaseUrl: string
+  ollamaModel: string
+  ollamaRuleReview: boolean
   lastBackupDate?: string
+}
+
+export interface LocalModel {
+  name: string
+  size: number
+  parameterSize?: string
+  quantizationLevel?: string
 }
 
 export interface ExportBundle extends EntityBase {
@@ -115,11 +148,14 @@ export interface CorrectionResult {
   derivedRule: string
   learnedGuidance: string
   revisedReply: string
+  mergeWithCorrectionIds: string[]
 }
 
 export type ChatEvent =
   | { type: 'accepted'; requestId: string; conversation: Conversation }
   | { type: 'delta'; requestId: string; delta: string }
+  | { type: 'reviewing'; requestId: string }
+  | { type: 'review-warning'; requestId: string; message: string }
   | { type: 'completed'; requestId: string; conversation: Conversation }
   | { type: 'cancelled'; requestId: string; conversation: Conversation }
   | { type: 'error'; requestId: string; message: string; conversation: Conversation }
@@ -129,6 +165,8 @@ export interface YourTalkerApi {
   character: {
     create(): Promise<CharacterProfile>
     save(character: CharacterProfile): Promise<CharacterProfile>
+    selectAvatar(characterId: string): Promise<CharacterProfile | null>
+    clearAvatar(characterId: string): Promise<CharacterProfile>
     analyzeDescription(
       characterId: string,
       description: string,
@@ -141,7 +179,12 @@ export interface YourTalkerApi {
     remove(conversationId: string): Promise<BootstrapData>
   }
   chat: {
-    send(conversationId: string, content: string, retryMessageId?: string): Promise<{ requestId: string }>
+    send(
+      conversationId: string,
+      content: string,
+      inputKind: UserInputKind,
+      retryMessageId?: string
+    ): Promise<{ requestId: string }>
     cancel(requestId: string): Promise<void>
     onEvent(listener: (event: ChatEvent) => void): () => void
   }
@@ -150,7 +193,19 @@ export interface YourTalkerApi {
     toggle(characterId: string, correctionId: string, active: boolean): Promise<BootstrapData>
   }
   settings: {
-    save(patch: { model?: string; reasoningEffort?: ReasoningEffort; selectedCharacterId?: string; selectedConversationId?: string }): Promise<AppSettings>
+    save(patch: {
+      modelProvider?: ModelProvider
+      model?: string
+      reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
+      ollamaRuleReview?: boolean
+      selectedCharacterId?: string
+      selectedConversationId?: string
+    }): Promise<AppSettings>
+  }
+  localModels: {
+    list(baseUrl: string): Promise<LocalModel[]>
   }
   secret: {
     set(apiKey: string): Promise<boolean>

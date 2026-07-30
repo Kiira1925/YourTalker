@@ -35,7 +35,12 @@ describe('JsonStore', () => {
 
   it('round-trips a full export without secrets', async () => {
     const source = await testStore()
-    const character = await source.saveCharacter({ ...createCharacter(), name: 'エクスポート対象' })
+    const avatarDataUrl = 'data:image/png;base64,iVBORw0KGgo='
+    const character = await source.saveCharacter({
+      ...createCharacter(),
+      name: 'エクスポート対象',
+      avatarDataUrl
+    })
     await source.saveConversation({ ...createConversation(character.id), title: '残したい会話' })
     await writeFile(source.secretPath, 'must-not-leak', 'utf8')
 
@@ -45,8 +50,70 @@ describe('JsonStore', () => {
 
     const destination = await testStore()
     await destination.importBundle(JSON.parse(serialized), 'replace')
-    expect((await destination.listCharacters()).map((item) => item.name)).toContain('エクスポート対象')
+    const importedCharacter = (await destination.listCharacters()).find(
+      (item) => item.name === 'エクスポート対象'
+    )
+    expect(importedCharacter?.avatarDataUrl).toBe(avatarDataUrl)
     expect((await destination.listConversations()).map((item) => item.title)).toContain('残したい会話')
+  })
+
+  it('keeps merged rule groups connected when IDs are remapped during import', async () => {
+    const source = await testStore()
+    const character = { ...createCharacter(), name: '統合ルール付き' }
+    const conversation = createConversation(character.id)
+    const createdAt = new Date().toISOString()
+    const firstMessageId = crypto.randomUUID()
+    const secondMessageId = crypto.randomUUID()
+    const firstCorrectionId = crypto.randomUUID()
+    const secondCorrectionId = crypto.randomUUID()
+    conversation.messages = [firstMessageId, secondMessageId].map((id) => ({
+      id,
+      schemaVersion: 1,
+      createdAt,
+      updatedAt: createdAt,
+      role: 'assistant' as const,
+      content: '修正版'
+    }))
+    character.corrections = [
+      {
+        id: firstCorrectionId,
+        schemaVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        conversationId: conversation.id,
+        messageId: firstMessageId,
+        ruleGroupId: firstCorrectionId,
+        feedbackText: '敬語を避けて',
+        derivedRule: '親しい場面では敬語を避ける',
+        originalReply: '元返答1',
+        revisedReply: '修正版1',
+        active: true
+      },
+      {
+        id: secondCorrectionId,
+        schemaVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        conversationId: conversation.id,
+        messageId: secondMessageId,
+        ruleGroupId: firstCorrectionId,
+        feedbackText: '軽口も入れて',
+        derivedRule: '親しい場面では敬語を避け、軽口を交える',
+        originalReply: '元返答2',
+        revisedReply: '修正版2',
+        active: true
+      }
+    ]
+    await source.saveCharacter(character)
+    await source.saveConversation(conversation)
+
+    const destination = await testStore()
+    await destination.importBundle(await source.createExport(), 'merge')
+    const imported = (await destination.listCharacters()).find((item) => item.name === '統合ルール付き')!
+
+    expect(imported.corrections[0].id).not.toBe(firstCorrectionId)
+    expect(imported.corrections[0].ruleGroupId).toBe(imported.corrections[0].id)
+    expect(imported.corrections[1].ruleGroupId).toBe(imported.corrections[0].id)
   })
 
   it('restores a valid sidecar when the primary JSON is corrupted', async () => {
@@ -72,5 +139,61 @@ describe('JsonStore', () => {
     await reopened.init()
     expect((await reopened.getCharacter(character.id)).learnedGuidance).toBe('- 復旧済み')
     expect((await reopened.getConversation(conversation.id)).title).toBe('復旧会話')
+  })
+
+  it('loads settings created before local model support with compatible defaults', async () => {
+    const store = await testStore()
+    const current = await store.getSettings()
+    const legacy = { ...current } as Record<string, unknown>
+    delete legacy.modelProvider
+    delete legacy.ollamaBaseUrl
+    delete legacy.ollamaModel
+    delete legacy.ollamaRuleReview
+    await writeFile(store.settingsPath, JSON.stringify(legacy), 'utf8')
+
+    const migrated = await store.getSettings()
+
+    expect(migrated.modelProvider).toBe('openai')
+    expect(migrated.ollamaBaseUrl).toBe('http://127.0.0.1:11434')
+    expect(migrated.ollamaModel).toBe('')
+    expect(migrated.ollamaRuleReview).toBe(true)
+  })
+
+  it('adds empty detailed profile fields when loading an older character', async () => {
+    const store = await testStore()
+    const legacy = { ...createCharacter(), name: '旧形式のキャラクター' } as Record<string, unknown>
+    for (const key of [
+      'age',
+      'gender',
+      'species',
+      'occupation',
+      'appearance',
+      'goals',
+      'abilities',
+      'weaknesses',
+      'fears',
+      'history',
+      'affiliations',
+      'secrets',
+      'behaviorStyle',
+      'habits',
+      'emotionalExpression',
+      'firstPerson',
+      'addressingOthers'
+    ]) {
+      delete legacy[key]
+    }
+    await writeFile(
+      join(store.charactersDir, `${legacy.id}.json`),
+      JSON.stringify(legacy),
+      'utf8'
+    )
+
+    const migrated = await store.getCharacter(String(legacy.id))
+
+    expect(migrated.name).toBe('旧形式のキャラクター')
+    expect(migrated.age).toBe('')
+    expect(migrated.behaviorStyle).toBe('')
+    expect(migrated.firstPerson).toBe('')
   })
 })

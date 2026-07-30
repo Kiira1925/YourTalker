@@ -2,6 +2,7 @@ import {
   Archive,
   BookOpen,
   Bot,
+  Camera,
   Check,
   ChevronLeft,
   CircleAlert,
@@ -31,51 +32,105 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BootstrapData,
   CharacterAnalysisMode,
+  CharacterAnalysisResult,
   CharacterProfile,
   ChatEvent,
   Conversation,
   Correction,
   Message,
+  ModelProvider,
+  LocalModel,
   ReasoningEffort,
+  UserInputKind,
   UpdateState
 } from '../../shared/types'
 
 type RightTab = 'profile' | 'memory'
 
-const profileFields: Array<{
-  key: keyof Pick<
-    CharacterProfile,
-    | 'name'
-    | 'callingName'
-    | 'overview'
-    | 'personality'
-    | 'values'
-    | 'world'
-    | 'relationship'
-    | 'speechStyle'
-    | 'catchphrases'
-    | 'likes'
-    | 'taboos'
-    | 'sampleDialogue'
-    | 'notes'
-  >
+type ProfileField = {
+  key: keyof CharacterAnalysisResult
   label: string
   placeholder: string
   compact?: boolean
+}
+
+const profileFieldGroups: Array<{
+  title: string
+  description: string
+  fields: ProfileField[]
 }> = [
-  { key: 'name', label: '名前', placeholder: '例：宵', compact: true },
-  { key: 'callingName', label: '呼び方', placeholder: 'ユーザーをどう呼ぶか', compact: true },
-  { key: 'overview', label: 'ひとことで', placeholder: 'キャラクターを一文で表すと？' },
-  { key: 'personality', label: '性格', placeholder: '穏やか、負けず嫌い、好奇心旺盛…' },
-  { key: 'values', label: '価値観', placeholder: '大切にしている考え、判断基準' },
-  { key: 'world', label: '背景・世界観', placeholder: '生い立ち、暮らす場所、時代や世界' },
-  { key: 'relationship', label: 'あなたとの関係', placeholder: '幼なじみ、相談相手、旅の仲間…' },
-  { key: 'speechStyle', label: '話し方', placeholder: '語尾、テンポ、敬語、文章の長さ' },
-  { key: 'catchphrases', label: '口癖', placeholder: 'よく使う言葉や独特の表現' },
-  { key: 'likes', label: '好き・苦手', placeholder: '趣味、食べ物、得意・不得意' },
-  { key: 'taboos', label: '避けること', placeholder: '言ってほしくない表現、崩してほしくない設定' },
-  { key: 'sampleDialogue', label: '会話例', placeholder: '理想に近いセリフをいくつか' },
-  { key: 'notes', label: '補足', placeholder: '上の項目に入らない設定' }
+  {
+    title: '基本情報',
+    description: '人物を識別する基礎情報',
+    fields: [
+      { key: 'name', label: '名前', placeholder: '例：宵', compact: true },
+      { key: 'age', label: '年齢・年代', placeholder: '例：23歳、外見は10代後半', compact: true },
+      { key: 'gender', label: '性別・ジェンダー', placeholder: '必要な場合に設定', compact: true },
+      { key: 'species', label: '種族・存在区分', placeholder: '人間、精霊、アンドロイド…', compact: true },
+      { key: 'occupation', label: '職業・役割', placeholder: '古書店主、騎士、案内役…', compact: true },
+      { key: 'overview', label: 'ひとことで', placeholder: 'キャラクターを一文で表すと？' },
+      { key: 'appearance', label: '外見・服装', placeholder: '容姿、体格、髪や目、服装、持ち物' }
+    ]
+  },
+  {
+    title: '内面',
+    description: '判断や感情を形づくるもの',
+    fields: [
+      { key: 'personality', label: '性格', placeholder: '穏やか、負けず嫌い、好奇心旺盛…' },
+      { key: 'values', label: '価値観', placeholder: '大切にしている考え、判断基準' },
+      { key: 'goals', label: '目的・望み', placeholder: '目指していること、現在の動機' },
+      { key: 'abilities', label: '能力・得意分野', placeholder: '技能、知識、特殊能力、戦い方' },
+      { key: 'weaknesses', label: '弱点・不得意', placeholder: '苦手なこと、能力の制約、欠点' },
+      { key: 'fears', label: '恐れ・コンプレックス', placeholder: '恐れているもの、心の傷、触れられたくない点' },
+      { key: 'likes', label: '好き・苦手', placeholder: '趣味、食べ物、好き嫌い' }
+    ]
+  },
+  {
+    title: '背景',
+    description: '今の人物像へ至った文脈',
+    fields: [
+      { key: 'world', label: '世界観・時代・場所', placeholder: '暮らす場所、時代、文化、世界のルール' },
+      { key: 'history', label: '生い立ち・経歴', placeholder: '過去の出来事、育った環境、転機' },
+      { key: 'affiliations', label: '所属・立場', placeholder: '組織、家族、仲間、敵対勢力' },
+      { key: 'secrets', label: '秘密・隠し事', placeholder: '本人が伏せている事実、話したがらないこと' }
+    ]
+  },
+  {
+    title: '関係性',
+    description: 'ユーザーとの距離と呼び方',
+    fields: [
+      { key: 'relationship', label: 'あなたとの関係', placeholder: '幼なじみ、相談相手、旅の仲間…' },
+      { key: 'callingName', label: 'あなたの呼び方', placeholder: 'ユーザーをどう呼ぶか', compact: true }
+    ]
+  },
+  {
+    title: '振る舞い',
+    description: '場面ごとに表れる反応',
+    fields: [
+      { key: 'behaviorStyle', label: '行動傾向', placeholder: '困ったとき、対立時、日常でどう動くか' },
+      { key: 'habits', label: '癖・習慣', placeholder: '仕草、日課、無意識にすること' },
+      { key: 'emotionalExpression', label: '感情表現', placeholder: '喜び方、怒り方、照れ方、弱音の見せ方' },
+      { key: 'taboos', label: '避けること', placeholder: '言ってほしくない表現、崩してほしくない設定' }
+    ]
+  },
+  {
+    title: '話し方',
+    description: '声として現れる個性',
+    fields: [
+      { key: 'firstPerson', label: '一人称', placeholder: '私、僕、俺、自分の名前…', compact: true },
+      { key: 'addressingOthers', label: '他者の呼び方', placeholder: '二人称、敬称、相手ごとの使い分け' },
+      { key: 'speechStyle', label: '口調・文章の組み立て', placeholder: '語尾、テンポ、敬語、文章の長さ' },
+      { key: 'catchphrases', label: '口癖', placeholder: 'よく使う言葉や独特の表現' },
+      { key: 'sampleDialogue', label: '会話例', placeholder: '理想に近いセリフをいくつか' }
+    ]
+  },
+  {
+    title: 'その他',
+    description: 'どの分類にも入らない情報だけ',
+    fields: [
+      { key: 'notes', label: '補足', placeholder: '上の項目に分類できない重要な設定のみ' }
+    ]
+  }
 ]
 
 function App() {
@@ -88,8 +143,10 @@ function App() {
   const [rightTab, setRightTab] = useState<RightTab>('profile')
   const [rightOpen, setRightOpen] = useState(true)
   const [composer, setComposer] = useState('')
+  const [composerKind, setComposerKind] = useState<UserInputKind>('dialogue')
   const [streamText, setStreamText] = useState('')
   const [activeRequestId, setActiveRequestId] = useState<string>()
+  const [reviewingReply, setReviewingReply] = useState(false)
   const [error, setError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [descriptionOpen, setDescriptionOpen] = useState(false)
@@ -117,6 +174,14 @@ function App() {
         setStreamText((current) => current + event.delta)
         return
       }
+      if (event.type === 'reviewing') {
+        setReviewingReply(true)
+        return
+      }
+      if (event.type === 'review-warning') {
+        setToast(event.message)
+        return
+      }
       setData((current) =>
         current
           ? {
@@ -130,9 +195,11 @@ function App() {
       )
       if (event.type === 'accepted') {
         setActiveRequestId(event.requestId)
+        setReviewingReply(false)
         setError(undefined)
       } else {
         setActiveRequestId(undefined)
+        setReviewingReply(false)
         setStreamText('')
         if (event.type === 'error') setError(event.message)
         if (event.type === 'cancelled') setToast('生成を中止しました')
@@ -226,6 +293,73 @@ function App() {
     }
   }
 
+  async function selectAvatar() {
+    if (!selectedCharacterId) return
+    setSaving(true)
+    try {
+      if (draft && draftDirty) {
+        const persisted = await window.yourTalker.character.save(draft)
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                characters: current.characters.map((item) => (item.id === persisted.id ? persisted : item))
+              }
+            : current
+        )
+        setDraft(structuredClone(persisted))
+        setDraftDirty(false)
+      }
+      const saved = await window.yourTalker.character.selectAvatar(selectedCharacterId)
+      if (!saved) return
+      setData((current) =>
+        current
+          ? { ...current, characters: current.characters.map((item) => (item.id === saved.id ? saved : item)) }
+          : current
+      )
+      setDraft(structuredClone(saved))
+      setDraftDirty(false)
+      setToast('アイコン画像を設定しました')
+    } catch (reason) {
+      setError(messageFrom(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearAvatar() {
+    if (!selectedCharacterId) return
+    setSaving(true)
+    try {
+      if (draft && draftDirty) {
+        const persisted = await window.yourTalker.character.save(draft)
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                characters: current.characters.map((item) => (item.id === persisted.id ? persisted : item))
+              }
+            : current
+        )
+        setDraft(structuredClone(persisted))
+        setDraftDirty(false)
+      }
+      const saved = await window.yourTalker.character.clearAvatar(selectedCharacterId)
+      setData((current) =>
+        current
+          ? { ...current, characters: current.characters.map((item) => (item.id === saved.id ? saved : item)) }
+          : current
+      )
+      setDraft(structuredClone(saved))
+      setDraftDirty(false)
+      setToast('アイコン画像を削除しました')
+    } catch (reason) {
+      setError(messageFrom(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function addConversation() {
     if (!selectedCharacterId) return
     try {
@@ -241,10 +375,16 @@ function App() {
 
   async function analyzeDescription() {
     if (!selectedCharacterId || !descriptionText.trim()) return
-    if (!data?.hasApiKey) {
+    if (data?.settings.modelProvider === 'openai' && !data.hasApiKey) {
       setDescriptionOpen(false)
       setSettingsOpen(true)
       setError('紹介文の解析にはOpenAI APIキーを設定してください。')
+      return
+    }
+    if (data?.settings.modelProvider === 'ollama' && !data.settings.ollamaModel.trim()) {
+      setDescriptionOpen(false)
+      setSettingsOpen(true)
+      setError('紹介文の解析に使うOllamaモデルを設定してください。')
       return
     }
     setDescriptionBusy(true)
@@ -289,11 +429,20 @@ function App() {
     }
   }
 
-  async function send(content = composer, retryMessageId?: string) {
+  async function send(
+    content = composer,
+    retryMessageId?: string,
+    inputKind: UserInputKind = composerKind
+  ) {
     if (!content.trim() || activeRequestId) return
-    if (!data?.hasApiKey) {
+    if (data?.settings.modelProvider === 'openai' && !data.hasApiKey) {
       setSettingsOpen(true)
       setError('会話を始めるにはOpenAI APIキーを設定してください。')
+      return
+    }
+    if (data?.settings.modelProvider === 'ollama' && !data.settings.ollamaModel.trim()) {
+      setSettingsOpen(true)
+      setError('会話に使うOllamaモデルを設定してください。')
       return
     }
     try {
@@ -309,8 +458,14 @@ function App() {
       }
       setComposer('')
       setStreamText('')
+      setReviewingReply(false)
       setError(undefined)
-      const result = await window.yourTalker.chat.send(conversationId, content, retryMessageId)
+      const result = await window.yourTalker.chat.send(
+        conversationId,
+        content,
+        inputKind,
+        retryMessageId
+      )
       setActiveRequestId(result.requestId)
     } catch (reason) {
       setError(messageFrom(reason))
@@ -421,7 +576,7 @@ function App() {
               className={`character-card ${character.id === selectedCharacterId ? 'active' : ''}`}
               onClick={() => void selectCharacter(character.id)}
             >
-              <span className="avatar">{character.name.trim().slice(0, 1) || '?'}</span>
+              <CharacterAvatar character={character} className="avatar" />
               <span>
                 <strong>{character.name}</strong>
                 <small>{character.overview || '設定を追加して育てましょう'}</small>
@@ -525,20 +680,23 @@ function App() {
                     setCorrectionMessage(message)
                     setCorrectionFeedback('')
                   }}
-                  onRetry={() => void send(message.content, message.id)}
+                  onRetry={() => void send(message.content, message.id, message.inputKind ?? 'dialogue')}
                 />
               ))}
               {activeRequestId && streamText && (
                 <div className="message assistant">
-                  <span className="message-avatar">{selectedCharacter.name.slice(0, 1)}</span>
+                  <CharacterAvatar character={selectedCharacter} className="message-avatar" />
                   <div className="bubble">
                     <p>{streamText}<span className="stream-caret" /></p>
+                    {reviewingReply && (
+                      <small className="review-status"><Sparkles size={11} /> ルールとの整合性を確認中…</small>
+                    )}
                   </div>
                 </div>
               )}
               {activeRequestId && !streamText && (
                 <div className="message assistant thinking">
-                  <span className="message-avatar">{selectedCharacter.name.slice(0, 1)}</span>
+                  <CharacterAvatar character={selectedCharacter} className="message-avatar" />
                   <div className="typing-dots"><i /><i /><i /></div>
                 </div>
               )}
@@ -553,6 +711,31 @@ function App() {
                   <button onClick={() => setError(undefined)}><X size={14} /></button>
                 </div>
               )}
+              <div className="composer-mode-switch" role="group" aria-label="入力の種類">
+                <button
+                  type="button"
+                  className={composerKind === 'dialogue' ? 'active' : ''}
+                  aria-pressed={composerKind === 'dialogue'}
+                  onClick={() => setComposerKind('dialogue')}
+                  disabled={Boolean(activeRequestId)}
+                >
+                  <MessageCircleMore size={13} /> セリフ
+                </button>
+                <button
+                  type="button"
+                  className={composerKind === 'narration' ? 'active' : ''}
+                  aria-pressed={composerKind === 'narration'}
+                  onClick={() => setComposerKind('narration')}
+                  disabled={Boolean(activeRequestId)}
+                >
+                  <BookOpen size={13} /> 描写
+                </button>
+                <span>
+                  {composerKind === 'dialogue'
+                    ? `${selectedCharacter.name}へ話しかけます`
+                    : '情景・行動・心情として伝えます'}
+                </span>
+              </div>
               <div className="composer">
                 <textarea
                   value={composer}
@@ -563,7 +746,11 @@ function App() {
                       void send()
                     }
                   }}
-                  placeholder={`${selectedCharacter.name}に話しかける…`}
+                  placeholder={
+                    composerKind === 'dialogue'
+                      ? `${selectedCharacter.name}に話しかける…`
+                      : '情景、出来事、行動や心情を描写する…'
+                  }
                   rows={1}
                   disabled={Boolean(activeRequestId)}
                 />
@@ -597,10 +784,25 @@ function App() {
           {rightTab === 'profile' ? (
             <div className="profile-editor">
               <div className="panel-intro">
-                <span className="avatar large-avatar">{draft.name.trim().slice(0, 1) || '?'}</span>
-                <div>
+                <button
+                  type="button"
+                  className="avatar-picker"
+                  onClick={() => void selectAvatar()}
+                  aria-label="アイコン画像を選択"
+                  title="アイコン画像を選択"
+                >
+                  <CharacterAvatar character={draft} className="avatar large-avatar" />
+                  <span className="avatar-picker-badge"><Camera size={11} /></span>
+                </button>
+                <div className="panel-intro-copy">
                   <h2>らしさの設計図</h2>
                   <p>空欄のままでも大丈夫。会話しながら育てられます。</p>
+                  <div className="avatar-actions">
+                    <button type="button" onClick={() => void selectAvatar()}>画像を選択</button>
+                    {draft.avatarDataUrl && (
+                      <button type="button" onClick={() => void clearAvatar()}>削除</button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="description-import-card">
@@ -619,30 +821,38 @@ function App() {
                   文章を解析
                 </button>
               </div>
-              {profileFields.map((field) => (
-                <label className={field.compact ? 'compact-field' : ''} key={field.key}>
-                  <span>{field.label}</span>
-                  {field.compact ? (
-                    <input
-                      value={draft[field.key]}
-                      placeholder={field.placeholder}
-                      onChange={(event) => {
-                        setDraft({ ...draft, [field.key]: event.target.value })
-                        setDraftDirty(true)
-                      }}
-                    />
-                  ) : (
-                    <textarea
-                      value={draft[field.key]}
-                      placeholder={field.placeholder}
-                      rows={field.key === 'sampleDialogue' ? 4 : 3}
-                      onChange={(event) => {
-                        setDraft({ ...draft, [field.key]: event.target.value })
-                        setDraftDirty(true)
-                      }}
-                    />
-                  )}
-                </label>
+              {profileFieldGroups.map((group) => (
+                <section className="profile-field-section" key={group.title}>
+                  <header>
+                    <strong>{group.title}</strong>
+                    <small>{group.description}</small>
+                  </header>
+                  {group.fields.map((field) => (
+                    <label className={field.compact ? 'compact-field' : ''} key={field.key}>
+                      <span>{field.label}</span>
+                      {field.compact ? (
+                        <input
+                          value={draft[field.key]}
+                          placeholder={field.placeholder}
+                          onChange={(event) => {
+                            setDraft({ ...draft, [field.key]: event.target.value })
+                            setDraftDirty(true)
+                          }}
+                        />
+                      ) : (
+                        <textarea
+                          value={draft[field.key]}
+                          placeholder={field.placeholder}
+                          rows={field.key === 'sampleDialogue' ? 4 : 3}
+                          onChange={(event) => {
+                            setDraft({ ...draft, [field.key]: event.target.value })
+                            setDraftDirty(true)
+                          }}
+                        />
+                      )}
+                    </label>
+                  ))}
+                </section>
               ))}
               <button className="danger-link" onClick={() => void removeCharacter()}>
                 <Trash2 size={15} /> このキャラクターを削除
@@ -728,7 +938,9 @@ function App() {
               </label>
             </fieldset>
             <p className="api-disclosure">
-              解析時、この紹介文は設定中のOpenAIモデルへ送信されます。
+              {data.settings.modelProvider === 'ollama'
+                ? '解析は端末上のOllamaモデルで行われ、紹介文は外部へ送信されません。'
+                : '解析時、この紹介文は設定中のOpenAIモデルへ送信されます。'}
             </p>
             {descriptionError && (
               <div className="modal-error">
@@ -791,6 +1003,24 @@ function App() {
   )
 }
 
+function CharacterAvatar({
+  character,
+  className
+}: {
+  character: Pick<CharacterProfile, 'name' | 'avatarDataUrl'>
+  className: string
+}) {
+  return (
+    <span className={className} aria-hidden="true">
+      {character.avatarDataUrl ? (
+        <img src={character.avatarDataUrl} alt="" />
+      ) : (
+        character.name.trim().slice(0, 1) || '?'
+      )}
+    </span>
+  )
+}
+
 function EmptyWelcome({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="empty-stage">
@@ -809,7 +1039,7 @@ function EmptyWelcome({ onCreate }: { onCreate: () => void }) {
 function EmptyConversation({ character, onCreate }: { character: CharacterProfile; onCreate: () => void }) {
   return (
     <div className="empty-stage conversation-empty-stage">
-      <span className="avatar hero-avatar">{character.name.slice(0, 1)}</span>
+      <CharacterAvatar character={character} className="avatar hero-avatar" />
       <span className="eyebrow">READY WHEN YOU ARE</span>
       <h2>{character.name}との新しい会話</h2>
       <p>{character.overview || '右側の設計図を埋めるか、まずは気軽に話しかけてみましょう。'}</p>
@@ -830,9 +1060,19 @@ function MessageBubble({
   onRetry: () => void
 }) {
   return (
-    <div className={`message ${message.role} ${message.status === 'failed' ? 'failed' : ''}`}>
-      {message.role === 'assistant' && <span className="message-avatar">{character.name.slice(0, 1)}</span>}
+    <div
+      className={[
+        'message',
+        message.role,
+        message.inputKind === 'narration' ? 'narration' : '',
+        message.status === 'failed' ? 'failed' : ''
+      ].filter(Boolean).join(' ')}
+    >
+      {message.role === 'assistant' && <CharacterAvatar character={character} className="message-avatar" />}
       <div className="bubble">
+        {message.role === 'user' && message.inputKind === 'narration' && (
+          <span className="narration-label"><BookOpen size={12} /> 描写</span>
+        )}
         <p>{message.content}</p>
         {message.correctionId && <span className="corrected-label"><Sparkles size={12} /> 指摘を反映済み</span>}
         <div className="message-actions">
@@ -856,7 +1096,17 @@ function MemoryPanel({
   character: CharacterProfile
   onToggle: (correction: Correction) => void
 }) {
-  const activeCount = character.corrections.filter((item) => item.active).length
+  const groupedCorrections = new Map<string, Correction[]>()
+  for (const correction of character.corrections) {
+    const groupId = correction.ruleGroupId ?? correction.id
+    const group = groupedCorrections.get(groupId) ?? []
+    group.push(correction)
+    groupedCorrections.set(groupId, group)
+  }
+  const ruleGroups = [...groupedCorrections.values()]
+    .map((corrections) => corrections.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    .sort((a, b) => b[0].createdAt.localeCompare(a[0].createdAt))
+  const activeCount = ruleGroups.filter((group) => group.some((item) => item.active)).length
   return (
     <div className="memory-panel">
       <div className="memory-summary">
@@ -873,33 +1123,53 @@ function MemoryPanel({
         </div>
       )}
       <div className="memory-list">
-        {character.corrections
-          .slice()
-          .reverse()
-          .map((correction, index) => (
-            <article className={`memory-card ${correction.active ? '' : 'inactive'}`} key={correction.id}>
+        {ruleGroups.map((group, index) => {
+          const current = group.find((correction) => correction.active) ?? group[0]
+          const groupActive = group.some((correction) => correction.active)
+          return (
+            <article className={`memory-card ${groupActive ? '' : 'inactive'}`} key={current.ruleGroupId ?? current.id}>
               <header>
-                <span>RULE {character.corrections.length - index}</span>
+                <span>
+                  RULE {ruleGroups.length - index}
+                  {group.length > 1 && ` · ${group.length}件を統合`}
+                </span>
                 <button
-                  className={`toggle ${correction.active ? 'on' : ''}`}
-                  onClick={() => void onToggle(correction)}
-                  aria-label={correction.active ? 'ルールを無効にする' : 'ルールを有効にする'}
+                  className={`toggle ${current.active ? 'on' : ''}`}
+                  onClick={() => void onToggle(current)}
+                  aria-label={current.active ? '最新の指摘を無効にする' : '最新の指摘を有効にする'}
                 >
                   <i />
                 </button>
               </header>
-              <strong>{correction.derivedRule}</strong>
+              <strong>{current.derivedRule}</strong>
               <details>
-                <summary>指摘と修正履歴を見る</summary>
-                <dl>
-                  <dt>指摘</dt><dd>{correction.feedbackText}</dd>
-                  <dt>元の返答</dt><dd>{correction.originalReply}</dd>
-                  <dt>修正版</dt><dd>{correction.revisedReply}</dd>
-                </dl>
+                <summary>{group.length > 1 ? `${group.length}件の統合履歴を見る` : '指摘と修正履歴を見る'}</summary>
+                {group.map((correction, historyIndex) => (
+                  <section className="correction-history" key={correction.id}>
+                    <header>
+                      <b>指摘 {group.length - historyIndex}</b>
+                      <button
+                        className={`toggle compact ${correction.active ? 'on' : ''}`}
+                        onClick={() => void onToggle(correction)}
+                        aria-label={correction.active ? 'この指摘を無効にする' : 'この指摘を有効にする'}
+                      >
+                        <i />
+                      </button>
+                    </header>
+                    <dl>
+                      <dt>ルール</dt><dd>{correction.derivedRule}</dd>
+                      <dt>指摘</dt><dd>{correction.feedbackText}</dd>
+                      <dt>元の返答</dt><dd>{correction.originalReply}</dd>
+                      <dt>修正版</dt><dd>{correction.revisedReply}</dd>
+                    </dl>
+                    <time>{new Date(correction.createdAt).toLocaleString('ja-JP')}</time>
+                  </section>
+                ))}
               </details>
-              <time>{new Date(correction.createdAt).toLocaleString('ja-JP')}</time>
+              <time>{new Date(current.createdAt).toLocaleString('ja-JP')}</time>
             </article>
-          ))}
+          )
+        })}
         {character.corrections.length === 0 && (
           <div className="empty-memory">
             <BookOpen size={28} />
@@ -930,8 +1200,14 @@ function SettingsModal({
   installBlocked: boolean
 }) {
   const [apiKey, setApiKey] = useState('')
+  const [provider, setProvider] = useState<ModelProvider>(data.settings.modelProvider)
   const [model, setModel] = useState(data.settings.model)
   const [effort, setEffort] = useState<ReasoningEffort>(data.settings.reasoningEffort)
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(data.settings.ollamaBaseUrl)
+  const [ollamaModel, setOllamaModel] = useState(data.settings.ollamaModel)
+  const [ollamaRuleReview, setOllamaRuleReview] = useState(data.settings.ollamaRuleReview)
+  const [localModels, setLocalModels] = useState<LocalModel[]>([])
+  const [checkingLocal, setCheckingLocal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [localError, setLocalError] = useState<string>()
@@ -940,8 +1216,18 @@ function SettingsModal({
     setBusy(true)
     setLocalError(undefined)
     try {
+      if (provider === 'ollama' && !ollamaModel.trim()) {
+        throw new Error('使用するOllamaモデルを選択または入力してください。')
+      }
       if (apiKey.trim()) await window.yourTalker.secret.set(apiKey)
-      const settings = await window.yourTalker.settings.save({ model, reasoningEffort: effort })
+      const settings = await window.yourTalker.settings.save({
+        modelProvider: provider,
+        model,
+        reasoningEffort: effort,
+        ollamaBaseUrl,
+        ollamaModel,
+        ollamaRuleReview
+      })
       onChange({ ...data, settings, hasApiKey: data.hasApiKey || Boolean(apiKey.trim()) })
       onToast('設定を保存しました')
       onClose()
@@ -949,6 +1235,26 @@ function SettingsModal({
       setLocalError(messageFrom(reason))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function checkLocalModels() {
+    setCheckingLocal(true)
+    setLocalError(undefined)
+    try {
+      const models = await window.yourTalker.localModels.list(ollamaBaseUrl)
+      setLocalModels(models)
+      if (!models.length) {
+        throw new Error('Ollamaにモデルがありません。先にモデルをダウンロードしてください。')
+      }
+      if (!ollamaModel.trim() || !models.some((item) => item.name === ollamaModel)) {
+        setOllamaModel(models[0].name)
+      }
+      onToast(`${models.length}件のローカルモデルを確認しました`)
+    } catch (reason) {
+      setLocalError(messageFrom(reason))
+    } finally {
+      setCheckingLocal(false)
     }
   }
 
@@ -1007,53 +1313,141 @@ function SettingsModal({
           onInstall={applyUpdate}
         />
         <div className="settings-section">
-          <div className="setting-title"><KeyRound size={17} /><div><strong>OpenAI API</strong><small>キーはWindowsの暗号化機能で保護されます</small></div></div>
-          <label>
-            <span>
-              APIキー {data.hasApiKey && <em>設定済み</em>}
-              {data.hasApiKey && (
+          <div className="setting-title"><Bot size={17} /><div><strong>会話の生成方法</strong><small>クラウドAPIと端末内のモデルを切り替えられます</small></div></div>
+          <div className="provider-options">
+            <button
+              type="button"
+              className={provider === 'ollama' ? 'selected' : ''}
+              onClick={() => setProvider('ollama')}
+            >
+              <strong>ローカルLLM</strong>
+              <small>APIキー不要・Ollamaを使用</small>
+            </button>
+            <button
+              type="button"
+              className={provider === 'openai' ? 'selected' : ''}
+              onClick={() => setProvider('openai')}
+            >
+              <strong>OpenAI API</strong>
+              <small>クラウドモデルを使用</small>
+            </button>
+          </div>
+
+          {provider === 'ollama' ? (
+            <div className="provider-panel">
+              <div className="setting-title compact-title">
+                <Bot size={17} />
+                <div><strong>Ollama</strong><small>Windows上で動作するローカルモデルへ接続します</small></div>
+              </div>
+              <label>
+                <span>接続先</span>
+                <input
+                  value={ollamaBaseUrl}
+                  onChange={(event) => setOllamaBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:11434"
+                  autoComplete="off"
+                />
+              </label>
+              <div className="local-model-row">
+                <label>
+                  <span>使用するモデル</span>
+                  <input
+                    list="ollama-models"
+                    value={ollamaModel}
+                    onChange={(event) => setOllamaModel(event.target.value)}
+                    placeholder="例：gemma3:4b"
+                    autoComplete="off"
+                  />
+                  <datalist id="ollama-models">
+                    {localModels.map((item) => <option value={item.name} key={item.name} />)}
+                  </datalist>
+                </label>
                 <button
                   type="button"
-                  className="inline-danger"
-                  onClick={async () => {
-                    if (!window.confirm('保存済みのAPIキーを削除しますか？')) return
-                    await window.yourTalker.secret.remove()
-                    onChange({ ...data, hasApiKey: false })
-                    setApiKey('')
-                    onToast('APIキーを削除しました')
-                  }}
+                  className="secondary local-check"
+                  disabled={checkingLocal}
+                  onClick={() => void checkLocalModels()}
                 >
-                  削除
+                  {checkingLocal ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
+                  接続確認
                 </button>
+              </div>
+              {localModels.length > 0 && (
+                <div className="model-summary">
+                  {localModels.map((item) => (
+                    <span className={item.name === ollamaModel ? 'active' : ''} key={item.name}>
+                      {item.name}{item.parameterSize ? ` · ${item.parameterSize}` : ''}
+                    </span>
+                  ))}
+                </div>
               )}
-            </span>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={data.hasApiKey ? '変更する場合だけ入力' : 'sk-…'}
-              autoComplete="off"
-            />
-          </label>
-          <div className="settings-grid">
-            <label>
-              <span>モデル</span>
-              <select value={model} onChange={(event) => setModel(event.target.value)}>
-                <option value="gpt-5.6-terra">GPT-5.6 Terra — バランス</option>
-                <option value="gpt-5.6-sol">GPT-5.6 Sol — 品質優先</option>
-                <option value="gpt-5.6-luna">GPT-5.6 Luna — コスト優先</option>
-              </select>
-            </label>
-            <label>
-              <span>推論強度</span>
-              <select value={effort} onChange={(event) => setEffort(event.target.value as ReasoningEffort)}>
-                <option value="none">なし — 最速</option>
-                <option value="low">低 — おすすめ</option>
-                <option value="medium">中</option>
-                <option value="high">高 — じっくり</option>
-              </select>
-            </label>
-          </div>
+              <label className="quality-toggle">
+                <input
+                  type="checkbox"
+                  checked={ollamaRuleReview}
+                  onChange={(event) => setOllamaRuleReview(event.target.checked)}
+                />
+                <span>
+                  <strong>返答をルール照合して自動修正</strong>
+                  <small>追加の確認処理で完了まで長くなりますが、キャラクター設定や学習ルールからのズレを抑えます</small>
+                </span>
+              </label>
+              <p className="privacy-note">
+                Ollamaをインストールして起動し、モデルがない場合はPowerShellで
+                <code>ollama pull gemma3:4b</code>などを実行してください。
+              </p>
+            </div>
+          ) : (
+            <div className="provider-panel">
+              <div className="setting-title compact-title"><KeyRound size={17} /><div><strong>OpenAI API</strong><small>キーはWindowsの暗号化機能で保護されます</small></div></div>
+              <label>
+                <span>
+                  APIキー {data.hasApiKey && <em>設定済み</em>}
+                  {data.hasApiKey && (
+                    <button
+                      type="button"
+                      className="inline-danger"
+                      onClick={async () => {
+                        if (!window.confirm('保存済みのAPIキーを削除しますか？')) return
+                        await window.yourTalker.secret.remove()
+                        onChange({ ...data, hasApiKey: false })
+                        setApiKey('')
+                        onToast('APIキーを削除しました')
+                      }}
+                    >
+                      削除
+                    </button>
+                  )}
+                </span>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder={data.hasApiKey ? '変更する場合だけ入力' : 'sk-…'}
+                  autoComplete="off"
+                />
+              </label>
+              <div className="settings-grid">
+                <label>
+                  <span>モデル</span>
+                  <select value={model} onChange={(event) => setModel(event.target.value)}>
+                    <option value="gpt-5.6-terra">GPT-5.6 Terra — バランス</option>
+                    <option value="gpt-5.6-sol">GPT-5.6 Sol — 品質優先</option>
+                    <option value="gpt-5.6-luna">GPT-5.6 Luna — コスト優先</option>
+                  </select>
+                </label>
+                <label>
+                  <span>推論強度</span>
+                  <select value={effort} onChange={(event) => setEffort(event.target.value as ReasoningEffort)}>
+                    <option value="none">なし — 最速</option>
+                    <option value="low">低 — おすすめ</option>
+                    <option value="medium">中</option>
+                    <option value="high">高 — じっくり</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
         </div>
         <div className="settings-section">
           <div className="setting-title"><Archive size={17} /><div><strong>保存とバックアップ</strong><small>{data.dataPath}</small></div></div>
@@ -1071,7 +1465,11 @@ function SettingsModal({
             <button onClick={() => void importData('merge')}><Upload size={16} /> データを追加</button>
             <button onClick={() => void importData('replace')}><RotateCcw size={16} /> バックアップから復元</button>
           </div>
-          <p className="privacy-note">APIキーは書き出しデータに含まれません。会話内容は生成時のみOpenAI APIへ送信されます。</p>
+          <p className="privacy-note">
+            {provider === 'ollama'
+              ? 'ローカルLLM利用時、キャラクター設定と会話内容は端末外へ送信されません。'
+              : 'APIキーは書き出しデータに含まれません。会話内容は生成時のみOpenAI APIへ送信されます。'}
+          </p>
         </div>
         {localError && <div className="error-banner static"><CircleAlert size={16} />{localError}</div>}
         <div className="modal-actions">

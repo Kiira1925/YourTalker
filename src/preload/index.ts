@@ -4,7 +4,9 @@ import type {
   CharacterAnalysisMode,
   ChatEvent,
   ImportMode,
+  ModelProvider,
   ReasoningEffort,
+  UserInputKind,
   UpdateState,
   YourTalkerApi
 } from '../shared/types'
@@ -14,6 +16,8 @@ const api: YourTalkerApi = {
   character: {
     create: () => ipcRenderer.invoke('character:create'),
     save: (character: CharacterProfile) => ipcRenderer.invoke('character:save', character),
+    selectAvatar: (characterId: string) => ipcRenderer.invoke('character:select-avatar', characterId),
+    clearAvatar: (characterId: string) => ipcRenderer.invoke('character:clear-avatar', characterId),
     analyzeDescription: (characterId: string, description: string, mode: CharacterAnalysisMode) =>
       ipcRenderer.invoke('character:analyze-description', characterId, description, mode),
     remove: (characterId: string) => ipcRenderer.invoke('character:remove', characterId)
@@ -23,8 +27,8 @@ const api: YourTalkerApi = {
     remove: (conversationId: string) => ipcRenderer.invoke('conversation:remove', conversationId)
   },
   chat: {
-    send: (conversationId: string, content: string, retryMessageId?: string) =>
-      ipcRenderer.invoke('chat:send', conversationId, content, retryMessageId),
+    send: (conversationId: string, content: string, inputKind: UserInputKind, retryMessageId?: string) =>
+      ipcRenderer.invoke('chat:send', conversationId, content, inputKind, retryMessageId),
     cancel: (requestId: string) => ipcRenderer.invoke('chat:cancel', requestId),
     onEvent: (listener: (event: ChatEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: ChatEvent) => listener(payload)
@@ -40,11 +44,18 @@ const api: YourTalkerApi = {
   },
   settings: {
     save: (patch: {
+      modelProvider?: ModelProvider
       model?: string
       reasoningEffort?: ReasoningEffort
+      ollamaBaseUrl?: string
+      ollamaModel?: string
+      ollamaRuleReview?: boolean
       selectedCharacterId?: string
       selectedConversationId?: string
     }) => ipcRenderer.invoke('settings:save', patch)
+  },
+  localModels: {
+    list: (baseUrl: string) => ipcRenderer.invoke('local-models:list', baseUrl)
   },
   secret: {
     set: (apiKey: string) => ipcRenderer.invoke('secret:set', apiKey),

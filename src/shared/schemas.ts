@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { SCHEMA_VERSION } from './types'
+import { SCHEMA_VERSION, type CharacterAnalysisResult } from './types'
 
 const entityBase = {
   id: z.string().uuid(),
@@ -12,6 +12,7 @@ export const correctionSchema = z.object({
   ...entityBase,
   conversationId: z.string().uuid(),
   messageId: z.string().uuid(),
+  ruleGroupId: z.string().uuid().optional(),
   feedbackText: z.string().min(1),
   derivedRule: z.string().min(1),
   originalReply: z.string(),
@@ -21,12 +22,29 @@ export const correctionSchema = z.object({
 
 const characterAnalysisFields = {
   name: z.string(),
+  age: z.string(),
+  gender: z.string(),
+  species: z.string(),
+  occupation: z.string(),
+  appearance: z.string(),
   callingName: z.string(),
   overview: z.string(),
   personality: z.string(),
   values: z.string(),
+  goals: z.string(),
+  abilities: z.string(),
+  weaknesses: z.string(),
+  fears: z.string(),
   world: z.string(),
+  history: z.string(),
+  affiliations: z.string(),
+  secrets: z.string(),
   relationship: z.string(),
+  behaviorStyle: z.string(),
+  habits: z.string(),
+  emotionalExpression: z.string(),
+  firstPerson: z.string(),
+  addressingOthers: z.string(),
   speechStyle: z.string(),
   catchphrases: z.string(),
   likes: z.string(),
@@ -37,18 +55,65 @@ const characterAnalysisFields = {
 
 export const characterAnalysisResultSchema = z.object(characterAnalysisFields)
 
-export const characterSchema = z.object({
+const emptyCharacterAnalysis: CharacterAnalysisResult = {
+  name: '',
+  age: '',
+  gender: '',
+  species: '',
+  occupation: '',
+  appearance: '',
+  callingName: '',
+  overview: '',
+  personality: '',
+  values: '',
+  goals: '',
+  abilities: '',
+  weaknesses: '',
+  fears: '',
+  world: '',
+  history: '',
+  affiliations: '',
+  secrets: '',
+  relationship: '',
+  behaviorStyle: '',
+  habits: '',
+  emotionalExpression: '',
+  firstPerson: '',
+  addressingOthers: '',
+  speechStyle: '',
+  catchphrases: '',
+  likes: '',
+  taboos: '',
+  sampleDialogue: '',
+  notes: ''
+}
+
+const characterObjectSchema = z.object({
   ...entityBase,
   ...characterAnalysisFields,
   name: z.string().min(1),
+  avatarDataUrl: z
+    .string()
+    .max(2_500_000)
+    .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+    .optional(),
   learnedGuidance: z.string(),
   corrections: z.array(correctionSchema)
 })
+
+export const characterSchema = z.preprocess(
+  (value) =>
+    value && typeof value === 'object'
+      ? { ...emptyCharacterAnalysis, ...(value as Record<string, unknown>) }
+      : value,
+  characterObjectSchema
+)
 
 export const messageSchema = z.object({
   ...entityBase,
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+  inputKind: z.enum(['dialogue', 'narration']).optional(),
   originalContent: z.string().optional(),
   correctionId: z.string().uuid().optional(),
   status: z.enum(['complete', 'failed']).optional()
@@ -68,8 +133,12 @@ export const settingsSchema = z.object({
   ...entityBase,
   selectedCharacterId: z.string().uuid().optional(),
   selectedConversationId: z.string().uuid().optional(),
+  modelProvider: z.enum(['openai', 'ollama']).default('openai'),
   model: z.string().min(1),
   reasoningEffort: z.enum(['none', 'low', 'medium', 'high']),
+  ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
+  ollamaModel: z.string().default(''),
+  ollamaRuleReview: z.boolean().default(true),
   lastBackupDate: z.string().optional()
 })
 
@@ -87,7 +156,8 @@ export const exportBundleSchema = z.object({
 export const correctionResultSchema = z.object({
   derivedRule: z.string().min(1),
   learnedGuidance: z.string(),
-  revisedReply: z.string().min(1)
+  revisedReply: z.string().min(1),
+  mergeWithCorrectionIds: z.array(z.string().uuid())
 })
 
 export const nonEmptyTextSchema = z.string().trim().min(1).max(20_000)

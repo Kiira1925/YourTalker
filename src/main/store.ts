@@ -46,12 +46,29 @@ export function createCharacter(): CharacterProfile {
   return {
     ...newBase(),
     name: '新しいキャラクター',
+    age: '',
+    gender: '',
+    species: '',
+    occupation: '',
+    appearance: '',
     callingName: '',
     overview: '',
     personality: '',
     values: '',
+    goals: '',
+    abilities: '',
+    weaknesses: '',
+    fears: '',
     world: '',
+    history: '',
+    affiliations: '',
+    secrets: '',
     relationship: '',
+    behaviorStyle: '',
+    habits: '',
+    emotionalExpression: '',
+    firstPerson: '',
+    addressingOthers: '',
     speechStyle: '',
     catchphrases: '',
     likes: '',
@@ -77,8 +94,12 @@ export function createConversation(characterId: string): Conversation {
 function createSettings(): AppSettings {
   return {
     ...newBase(),
+    modelProvider: 'openai',
     model: 'gpt-5.6-terra',
-    reasoningEffort: 'low'
+    reasoningEffort: 'low',
+    ollamaBaseUrl: 'http://127.0.0.1:11434',
+    ollamaModel: '',
+    ollamaRuleReview: true
   }
 }
 
@@ -389,6 +410,9 @@ function remapBundle(bundle: ExportBundle): ExportBundle {
     corrections: character.corrections.map((correction) => ({
       ...correction,
       id: correctionIds.get(correction.id)!,
+      ruleGroupId: correction.ruleGroupId
+        ? correctionIds.get(correction.ruleGroupId) ?? correctionIds.get(correction.id)!
+        : undefined,
       conversationId: conversationIds.get(correction.conversationId)!,
       messageId: messageIds.get(correction.messageId)!,
       createdAt: timestamp,
