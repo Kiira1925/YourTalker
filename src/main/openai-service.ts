@@ -60,12 +60,29 @@ function friendlyError(error: unknown): string {
 
 const characterAnalysisProperties = {
   name: { type: 'string', description: 'キャラクターの名前' },
+  age: { type: 'string', description: '年齢、年代、見た目年齢。明記がなければ空文字' },
+  gender: { type: 'string', description: '性別、ジェンダー。明記がなければ空文字' },
+  species: { type: 'string', description: '人間、種族、機械、精霊などの存在区分' },
+  occupation: { type: 'string', description: '職業、役割、担当、社会的な立場' },
+  appearance: { type: 'string', description: '容姿、体格、髪や目、服装、持ち物などの外見' },
   callingName: { type: 'string', description: 'キャラクターがユーザーを呼ぶときの呼称' },
   overview: { type: 'string', description: 'キャラクター像を短くまとめた概要' },
   personality: { type: 'string', description: '性格、感情傾向、対人態度' },
   values: { type: 'string', description: '大切にする価値観、判断基準、信念' },
-  world: { type: 'string', description: '背景、経歴、時代、場所、所属する世界観' },
+  goals: { type: 'string', description: '目的、願望、目指していること、現在の動機' },
+  abilities: { type: 'string', description: '能力、技能、得意分野、戦い方' },
+  weaknesses: { type: 'string', description: '弱点、不得意、制約、欠点' },
+  fears: { type: 'string', description: '恐れているもの、コンプレックス、心の傷' },
+  world: { type: 'string', description: '暮らす場所、時代、文化、作品内の世界観' },
+  history: { type: 'string', description: '生い立ち、過去の出来事、経歴' },
+  affiliations: { type: 'string', description: '所属組織、家族、仲間、敵対勢力、社会的立場' },
+  secrets: { type: 'string', description: '隠している事実、秘密、本人が話したがらないこと' },
   relationship: { type: 'string', description: 'キャラクターとユーザーの関係' },
+  behaviorStyle: { type: 'string', description: '状況に対する行動傾向、判断や反応の仕方' },
+  habits: { type: 'string', description: '仕草、日課、無意識の癖、習慣' },
+  emotionalExpression: { type: 'string', description: '喜怒哀楽の表し方、照れ方、怒り方、弱音の見せ方' },
+  firstPerson: { type: 'string', description: 'キャラクターが自分を指す一人称' },
+  addressingOthers: { type: 'string', description: 'ユーザー以外の人物の呼び方、二人称や敬称の使い分け' },
   speechStyle: { type: 'string', description: '語尾、敬語、テンポ、文量などの話し方' },
   catchphrases: { type: 'string', description: '紹介文に示された口癖や特徴的な言い回し' },
   likes: { type: 'string', description: '好き嫌い、趣味、得意不得意' },
@@ -141,6 +158,41 @@ function localReviewRequirements(character: CharacterProfile): LocalReviewRequir
   add('catchphrases', '口癖を使う場合の表現', character.catchphrases)
   add('sample-dialogue', '会話例と同じ話し方の傾向', character.sampleDialogue)
   add('notes', '補足設定と矛盾しない', character.notes)
+  add(
+    'identity-details',
+    '年齢・性別・種族・職業・外見',
+    [character.age, character.gender, character.species, character.occupation, character.appearance]
+      .filter((value) => value.trim())
+      .join(' / ')
+  )
+  add(
+    'motives-and-limits',
+    '目的・能力・弱点・恐れ',
+    [character.goals, character.abilities, character.weaknesses, character.fears]
+      .filter((value) => value.trim())
+      .join(' / ')
+  )
+  add(
+    'history-and-secrets',
+    '経歴・所属・秘密',
+    [character.history, character.affiliations, character.secrets]
+      .filter((value) => value.trim())
+      .join(' / ')
+  )
+  add(
+    'behavior',
+    '行動傾向・癖・感情表現',
+    [character.behaviorStyle, character.habits, character.emotionalExpression]
+      .filter((value) => value.trim())
+      .join(' / ')
+  )
+  add(
+    'pronouns',
+    '一人称・他者の呼び方',
+    [character.firstPerson, character.addressingOthers]
+      .filter((value) => value.trim())
+      .join(' / ')
+  )
   requirements.push(
     { id: 'identity', text: `「${character.name}」本人として返答し、AIとして自己言及しない` },
     { id: 'conversation-flow', text: '直近のユーザー発言と会話の事実に沿って自然に応答する' }
@@ -365,7 +417,8 @@ export class OpenAIService {
           '情報がない項目は空文字にし、設定を創作・補完しないでください。',
           'callingNameはキャラクターがユーザーをどう呼ぶかです。キャラクター自身の別名ではありません。',
           'overviewは人物像を短く要約し、その他の項目は会話生成に役立つ具体的な表現にしてください。',
-          'sampleDialogueには紹介文中の台詞や、明確に示された話し方の例だけを入れてください。'
+          'sampleDialogueには紹介文中の台詞や、明確に示された話し方の例だけを入れてください。',
+          '専用項目に分類できる情報をnotesへ重複させないでください。notesは他のどの項目にも分類できない重要事項だけにしてください。'
         ].join('\n'),
         [{ role: 'user', content: description }],
         {

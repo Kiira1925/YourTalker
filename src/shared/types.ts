@@ -51,12 +51,29 @@ export interface Correction extends EntityBase {
 
 export interface CharacterAnalysisResult {
   name: string
+  age: string
+  gender: string
+  species: string
+  occupation: string
+  appearance: string
   callingName: string
   overview: string
   personality: string
   values: string
+  goals: string
+  abilities: string
+  weaknesses: string
+  fears: string
   world: string
+  history: string
+  affiliations: string
+  secrets: string
   relationship: string
+  behaviorStyle: string
+  habits: string
+  emotionalExpression: string
+  firstPerson: string
+  addressingOthers: string
   speechStyle: string
   catchphrases: string
   likes: string

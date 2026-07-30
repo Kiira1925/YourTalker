@@ -158,4 +158,42 @@ describe('JsonStore', () => {
     expect(migrated.ollamaModel).toBe('')
     expect(migrated.ollamaRuleReview).toBe(true)
   })
+
+  it('adds empty detailed profile fields when loading an older character', async () => {
+    const store = await testStore()
+    const legacy = { ...createCharacter(), name: '旧形式のキャラクター' } as Record<string, unknown>
+    for (const key of [
+      'age',
+      'gender',
+      'species',
+      'occupation',
+      'appearance',
+      'goals',
+      'abilities',
+      'weaknesses',
+      'fears',
+      'history',
+      'affiliations',
+      'secrets',
+      'behaviorStyle',
+      'habits',
+      'emotionalExpression',
+      'firstPerson',
+      'addressingOthers'
+    ]) {
+      delete legacy[key]
+    }
+    await writeFile(
+      join(store.charactersDir, `${legacy.id}.json`),
+      JSON.stringify(legacy),
+      'utf8'
+    )
+
+    const migrated = await store.getCharacter(String(legacy.id))
+
+    expect(migrated.name).toBe('旧形式のキャラクター')
+    expect(migrated.age).toBe('')
+    expect(migrated.behaviorStyle).toBe('')
+    expect(migrated.firstPerson).toBe('')
+  })
 })

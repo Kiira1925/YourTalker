@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BootstrapData,
   CharacterAnalysisMode,
+  CharacterAnalysisResult,
   CharacterProfile,
   ChatEvent,
   Conversation,
@@ -46,40 +47,90 @@ import type {
 
 type RightTab = 'profile' | 'memory'
 
-const profileFields: Array<{
-  key: keyof Pick<
-    CharacterProfile,
-    | 'name'
-    | 'callingName'
-    | 'overview'
-    | 'personality'
-    | 'values'
-    | 'world'
-    | 'relationship'
-    | 'speechStyle'
-    | 'catchphrases'
-    | 'likes'
-    | 'taboos'
-    | 'sampleDialogue'
-    | 'notes'
-  >
+type ProfileField = {
+  key: keyof CharacterAnalysisResult
   label: string
   placeholder: string
   compact?: boolean
+}
+
+const profileFieldGroups: Array<{
+  title: string
+  description: string
+  fields: ProfileField[]
 }> = [
-  { key: 'name', label: '名前', placeholder: '例：宵', compact: true },
-  { key: 'callingName', label: '呼び方', placeholder: 'ユーザーをどう呼ぶか', compact: true },
-  { key: 'overview', label: 'ひとことで', placeholder: 'キャラクターを一文で表すと？' },
-  { key: 'personality', label: '性格', placeholder: '穏やか、負けず嫌い、好奇心旺盛…' },
-  { key: 'values', label: '価値観', placeholder: '大切にしている考え、判断基準' },
-  { key: 'world', label: '背景・世界観', placeholder: '生い立ち、暮らす場所、時代や世界' },
-  { key: 'relationship', label: 'あなたとの関係', placeholder: '幼なじみ、相談相手、旅の仲間…' },
-  { key: 'speechStyle', label: '話し方', placeholder: '語尾、テンポ、敬語、文章の長さ' },
-  { key: 'catchphrases', label: '口癖', placeholder: 'よく使う言葉や独特の表現' },
-  { key: 'likes', label: '好き・苦手', placeholder: '趣味、食べ物、得意・不得意' },
-  { key: 'taboos', label: '避けること', placeholder: '言ってほしくない表現、崩してほしくない設定' },
-  { key: 'sampleDialogue', label: '会話例', placeholder: '理想に近いセリフをいくつか' },
-  { key: 'notes', label: '補足', placeholder: '上の項目に入らない設定' }
+  {
+    title: '基本情報',
+    description: '人物を識別する基礎情報',
+    fields: [
+      { key: 'name', label: '名前', placeholder: '例：宵', compact: true },
+      { key: 'age', label: '年齢・年代', placeholder: '例：23歳、外見は10代後半', compact: true },
+      { key: 'gender', label: '性別・ジェンダー', placeholder: '必要な場合に設定', compact: true },
+      { key: 'species', label: '種族・存在区分', placeholder: '人間、精霊、アンドロイド…', compact: true },
+      { key: 'occupation', label: '職業・役割', placeholder: '古書店主、騎士、案内役…', compact: true },
+      { key: 'overview', label: 'ひとことで', placeholder: 'キャラクターを一文で表すと？' },
+      { key: 'appearance', label: '外見・服装', placeholder: '容姿、体格、髪や目、服装、持ち物' }
+    ]
+  },
+  {
+    title: '内面',
+    description: '判断や感情を形づくるもの',
+    fields: [
+      { key: 'personality', label: '性格', placeholder: '穏やか、負けず嫌い、好奇心旺盛…' },
+      { key: 'values', label: '価値観', placeholder: '大切にしている考え、判断基準' },
+      { key: 'goals', label: '目的・望み', placeholder: '目指していること、現在の動機' },
+      { key: 'abilities', label: '能力・得意分野', placeholder: '技能、知識、特殊能力、戦い方' },
+      { key: 'weaknesses', label: '弱点・不得意', placeholder: '苦手なこと、能力の制約、欠点' },
+      { key: 'fears', label: '恐れ・コンプレックス', placeholder: '恐れているもの、心の傷、触れられたくない点' },
+      { key: 'likes', label: '好き・苦手', placeholder: '趣味、食べ物、好き嫌い' }
+    ]
+  },
+  {
+    title: '背景',
+    description: '今の人物像へ至った文脈',
+    fields: [
+      { key: 'world', label: '世界観・時代・場所', placeholder: '暮らす場所、時代、文化、世界のルール' },
+      { key: 'history', label: '生い立ち・経歴', placeholder: '過去の出来事、育った環境、転機' },
+      { key: 'affiliations', label: '所属・立場', placeholder: '組織、家族、仲間、敵対勢力' },
+      { key: 'secrets', label: '秘密・隠し事', placeholder: '本人が伏せている事実、話したがらないこと' }
+    ]
+  },
+  {
+    title: '関係性',
+    description: 'ユーザーとの距離と呼び方',
+    fields: [
+      { key: 'relationship', label: 'あなたとの関係', placeholder: '幼なじみ、相談相手、旅の仲間…' },
+      { key: 'callingName', label: 'あなたの呼び方', placeholder: 'ユーザーをどう呼ぶか', compact: true }
+    ]
+  },
+  {
+    title: '振る舞い',
+    description: '場面ごとに表れる反応',
+    fields: [
+      { key: 'behaviorStyle', label: '行動傾向', placeholder: '困ったとき、対立時、日常でどう動くか' },
+      { key: 'habits', label: '癖・習慣', placeholder: '仕草、日課、無意識にすること' },
+      { key: 'emotionalExpression', label: '感情表現', placeholder: '喜び方、怒り方、照れ方、弱音の見せ方' },
+      { key: 'taboos', label: '避けること', placeholder: '言ってほしくない表現、崩してほしくない設定' }
+    ]
+  },
+  {
+    title: '話し方',
+    description: '声として現れる個性',
+    fields: [
+      { key: 'firstPerson', label: '一人称', placeholder: '私、僕、俺、自分の名前…', compact: true },
+      { key: 'addressingOthers', label: '他者の呼び方', placeholder: '二人称、敬称、相手ごとの使い分け' },
+      { key: 'speechStyle', label: '口調・文章の組み立て', placeholder: '語尾、テンポ、敬語、文章の長さ' },
+      { key: 'catchphrases', label: '口癖', placeholder: 'よく使う言葉や独特の表現' },
+      { key: 'sampleDialogue', label: '会話例', placeholder: '理想に近いセリフをいくつか' }
+    ]
+  },
+  {
+    title: 'その他',
+    description: 'どの分類にも入らない情報だけ',
+    fields: [
+      { key: 'notes', label: '補足', placeholder: '上の項目に分類できない重要な設定のみ' }
+    ]
+  }
 ]
 
 function App() {
@@ -770,30 +821,38 @@ function App() {
                   文章を解析
                 </button>
               </div>
-              {profileFields.map((field) => (
-                <label className={field.compact ? 'compact-field' : ''} key={field.key}>
-                  <span>{field.label}</span>
-                  {field.compact ? (
-                    <input
-                      value={draft[field.key]}
-                      placeholder={field.placeholder}
-                      onChange={(event) => {
-                        setDraft({ ...draft, [field.key]: event.target.value })
-                        setDraftDirty(true)
-                      }}
-                    />
-                  ) : (
-                    <textarea
-                      value={draft[field.key]}
-                      placeholder={field.placeholder}
-                      rows={field.key === 'sampleDialogue' ? 4 : 3}
-                      onChange={(event) => {
-                        setDraft({ ...draft, [field.key]: event.target.value })
-                        setDraftDirty(true)
-                      }}
-                    />
-                  )}
-                </label>
+              {profileFieldGroups.map((group) => (
+                <section className="profile-field-section" key={group.title}>
+                  <header>
+                    <strong>{group.title}</strong>
+                    <small>{group.description}</small>
+                  </header>
+                  {group.fields.map((field) => (
+                    <label className={field.compact ? 'compact-field' : ''} key={field.key}>
+                      <span>{field.label}</span>
+                      {field.compact ? (
+                        <input
+                          value={draft[field.key]}
+                          placeholder={field.placeholder}
+                          onChange={(event) => {
+                            setDraft({ ...draft, [field.key]: event.target.value })
+                            setDraftDirty(true)
+                          }}
+                        />
+                      ) : (
+                        <textarea
+                          value={draft[field.key]}
+                          placeholder={field.placeholder}
+                          rows={field.key === 'sampleDialogue' ? 4 : 3}
+                          onChange={(event) => {
+                            setDraft({ ...draft, [field.key]: event.target.value })
+                            setDraftDirty(true)
+                          }}
+                        />
+                      )}
+                    </label>
+                  ))}
+                </section>
               ))}
               <button className="danger-link" onClick={() => void removeCharacter()}>
                 <Trash2 size={15} /> このキャラクターを削除

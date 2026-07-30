@@ -315,6 +315,19 @@ button, summary { cursor: pointer; }
   min-height: 32px;
   width: 100%;
 }
+.profile-field-section {
+  margin: 0 -4px 18px;
+  padding: 16px 4px 2px;
+  border-top: 1px solid var(--line);
+}
+.profile-field-section > header { margin-bottom: 13px; }
+.profile-field-section > header strong {
+  display: block; color: var(--ink); font-size: 12px; letter-spacing: .02em;
+}
+.profile-field-section > header small {
+  display: block; margin-top: 3px; color: var(--faint); font-size: 8px; line-height: 1.5;
+}
+.profile-field-section label:last-child { margin-bottom: 5px; }
 label { display: block; margin-bottom: 14px; }
 label > span { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: #5b6865; font-size: 9px; font-weight: 700; letter-spacing: .04em; }
 label em { padding: 2px 5px; border-radius: 4px; color: #438061; background: #e5f1e9; font-style: normal; font-size: 8px; }
