@@ -40,6 +40,7 @@ import type {
   ModelProvider,
   LocalModel,
   ReasoningEffort,
+  UserInputKind,
   UpdateState
 } from '../../shared/types'
 
@@ -91,6 +92,7 @@ function App() {
   const [rightTab, setRightTab] = useState<RightTab>('profile')
   const [rightOpen, setRightOpen] = useState(true)
   const [composer, setComposer] = useState('')
+  const [composerKind, setComposerKind] = useState<UserInputKind>('dialogue')
   const [streamText, setStreamText] = useState('')
   const [activeRequestId, setActiveRequestId] = useState<string>()
   const [reviewingReply, setReviewingReply] = useState(false)
@@ -376,7 +378,11 @@ function App() {
     }
   }
 
-  async function send(content = composer, retryMessageId?: string) {
+  async function send(
+    content = composer,
+    retryMessageId?: string,
+    inputKind: UserInputKind = composerKind
+  ) {
     if (!content.trim() || activeRequestId) return
     if (data?.settings.modelProvider === 'openai' && !data.hasApiKey) {
       setSettingsOpen(true)
@@ -403,7 +409,12 @@ function App() {
       setStreamText('')
       setReviewingReply(false)
       setError(undefined)
-      const result = await window.yourTalker.chat.send(conversationId, content, retryMessageId)
+      const result = await window.yourTalker.chat.send(
+        conversationId,
+        content,
+        inputKind,
+        retryMessageId
+      )
       setActiveRequestId(result.requestId)
     } catch (reason) {
       setError(messageFrom(reason))
@@ -618,7 +629,7 @@ function App() {
                     setCorrectionMessage(message)
                     setCorrectionFeedback('')
                   }}
-                  onRetry={() => void send(message.content, message.id)}
+                  onRetry={() => void send(message.content, message.id, message.inputKind ?? 'dialogue')}
                 />
               ))}
               {activeRequestId && streamText && (
@@ -649,6 +660,31 @@ function App() {
                   <button onClick={() => setError(undefined)}><X size={14} /></button>
                 </div>
               )}
+              <div className="composer-mode-switch" role="group" aria-label="入力の種類">
+                <button
+                  type="button"
+                  className={composerKind === 'dialogue' ? 'active' : ''}
+                  aria-pressed={composerKind === 'dialogue'}
+                  onClick={() => setComposerKind('dialogue')}
+                  disabled={Boolean(activeRequestId)}
+                >
+                  <MessageCircleMore size={13} /> セリフ
+                </button>
+                <button
+                  type="button"
+                  className={composerKind === 'narration' ? 'active' : ''}
+                  aria-pressed={composerKind === 'narration'}
+                  onClick={() => setComposerKind('narration')}
+                  disabled={Boolean(activeRequestId)}
+                >
+                  <BookOpen size={13} /> 描写
+                </button>
+                <span>
+                  {composerKind === 'dialogue'
+                    ? `${selectedCharacter.name}へ話しかけます`
+                    : '情景・行動・心情として伝えます'}
+                </span>
+              </div>
               <div className="composer">
                 <textarea
                   value={composer}
@@ -659,7 +695,11 @@ function App() {
                       void send()
                     }
                   }}
-                  placeholder={`${selectedCharacter.name}に話しかける…`}
+                  placeholder={
+                    composerKind === 'dialogue'
+                      ? `${selectedCharacter.name}に話しかける…`
+                      : '情景、出来事、行動や心情を描写する…'
+                  }
                   rows={1}
                   disabled={Boolean(activeRequestId)}
                 />
@@ -961,9 +1001,19 @@ function MessageBubble({
   onRetry: () => void
 }) {
   return (
-    <div className={`message ${message.role} ${message.status === 'failed' ? 'failed' : ''}`}>
+    <div
+      className={[
+        'message',
+        message.role,
+        message.inputKind === 'narration' ? 'narration' : '',
+        message.status === 'failed' ? 'failed' : ''
+      ].filter(Boolean).join(' ')}
+    >
       {message.role === 'assistant' && <CharacterAvatar character={character} className="message-avatar" />}
       <div className="bubble">
+        {message.role === 'user' && message.inputKind === 'narration' && (
+          <span className="narration-label"><BookOpen size={12} /> 描写</span>
+        )}
         <p>{message.content}</p>
         {message.correctionId && <span className="corrected-label"><Sparkles size={12} /> 指摘を反映済み</span>}
         <div className="message-actions">

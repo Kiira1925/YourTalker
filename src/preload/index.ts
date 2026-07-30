@@ -6,6 +6,7 @@ import type {
   ImportMode,
   ModelProvider,
   ReasoningEffort,
+  UserInputKind,
   UpdateState,
   YourTalkerApi
 } from '../shared/types'
@@ -26,8 +27,8 @@ const api: YourTalkerApi = {
     remove: (conversationId: string) => ipcRenderer.invoke('conversation:remove', conversationId)
   },
   chat: {
-    send: (conversationId: string, content: string, retryMessageId?: string) =>
-      ipcRenderer.invoke('chat:send', conversationId, content, retryMessageId),
+    send: (conversationId: string, content: string, inputKind: UserInputKind, retryMessageId?: string) =>
+      ipcRenderer.invoke('chat:send', conversationId, content, inputKind, retryMessageId),
     cancel: (requestId: string) => ipcRenderer.invoke('chat:cancel', requestId),
     onEvent: (listener: (event: ChatEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: ChatEvent) => listener(payload)

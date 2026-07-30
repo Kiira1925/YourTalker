@@ -168,6 +168,16 @@ button, summary { cursor: pointer; }
   background: #fff; line-height: 1.8; font-size: 13px; box-shadow: 0 3px 12px rgba(38,48,44,.035);
 }
 .user .bubble > p { color: #fff; background: var(--teal); border-color: var(--teal); border-radius: 17px 17px 5px 17px; }
+.message.user.narration { justify-content: center; }
+.message.user.narration .bubble { width: 100%; max-width: min(88%, 700px); }
+.message.user.narration .bubble > p {
+  color: #59615f; background: #f2efe9; border-color: #d8d2c7; border-radius: 12px;
+  font-style: italic; box-shadow: none;
+}
+.narration-label {
+  display: flex; align-items: center; gap: 5px; margin: 0 3px 5px;
+  color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .05em;
+}
 .failed .bubble > p { opacity: .72; border-color: #dba89e; }
 .message-actions { display: flex; align-items: center; gap: 10px; min-height: 22px; padding: 4px 3px 0; }
 .message-actions button { opacity: 0; border: 0; background: transparent; color: var(--muted); font-size: 9px; display: flex; align-items: center; gap: 4px; padding: 2px; }
@@ -186,6 +196,18 @@ button, summary { cursor: pointer; }
   background: #fff7e4; color: #8b672c; font-size: 10px; border: 1px solid #ead9af;
 }
 .composer-wrap { flex: 0 0 auto; padding: 10px max(26px, calc((100% - 760px) / 2)) 18px; background: linear-gradient(transparent, var(--paper) 18%); }
+.composer-mode-switch { display: flex; align-items: center; gap: 4px; margin: 0 4px 7px; }
+.composer-mode-switch button {
+  min-height: 25px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid transparent; border-radius: 8px; color: var(--muted); background: transparent;
+  font-size: 9px; font-weight: 600;
+}
+.composer-mode-switch button:hover:not(:disabled) { color: var(--ink); background: rgba(255,255,255,.7); }
+.composer-mode-switch button.active {
+  color: var(--teal); border-color: #bdd2cd; background: #edf5f2;
+}
+.composer-mode-switch button:disabled { opacity: .55; }
+.composer-mode-switch > span { margin-left: 5px; color: var(--faint); font-size: 8px; }
 .composer { position: relative; display: flex; align-items: flex-end; background: #fff; border: 1px solid #d6d2c9; border-radius: 17px; padding: 5px 6px 5px 15px; box-shadow: 0 8px 28px rgba(32,46,42,.08); }
 .composer:focus-within { border-color: #7da39f; box-shadow: 0 8px 28px rgba(25,95,90,.1), 0 0 0 3px rgba(25,95,90,.08); }
 .composer textarea { border: 0; outline: 0; resize: none; width: 100%; min-height: 38px; max-height: 130px; padding: 9px 8px 6px 0; background: transparent; color: var(--ink); line-height: 1.45; font-size: 12px; }

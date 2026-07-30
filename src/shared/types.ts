@@ -5,6 +5,7 @@ export type ModelProvider = 'openai' | 'ollama'
 export type ExportKind = 'full' | 'character'
 export type ImportMode = 'merge' | 'replace'
 export type CharacterAnalysisMode = 'overwrite' | 'fill-empty'
+export type UserInputKind = 'dialogue' | 'narration'
 export type UpdateStatus =
   | 'disabled'
   | 'idle'
@@ -75,6 +76,7 @@ export type MessageRole = 'user' | 'assistant'
 export interface Message extends EntityBase {
   role: MessageRole
   content: string
+  inputKind?: UserInputKind
   originalContent?: string
   correctionId?: string
   status?: 'complete' | 'failed'
@@ -160,7 +162,12 @@ export interface YourTalkerApi {
     remove(conversationId: string): Promise<BootstrapData>
   }
   chat: {
-    send(conversationId: string, content: string, retryMessageId?: string): Promise<{ requestId: string }>
+    send(
+      conversationId: string,
+      content: string,
+      inputKind: UserInputKind,
+      retryMessageId?: string
+    ): Promise<{ requestId: string }>
     cancel(requestId: string): Promise<void>
     onEvent(listener: (event: ChatEvent) => void): () => void
   }

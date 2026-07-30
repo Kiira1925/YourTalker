@@ -375,6 +375,25 @@ describe('OpenAIService', () => {
     ])
   })
 
+  it('stores narration separately and tells the model it is not spoken dialogue', async () => {
+    const { store, conversation, events, service } = await fixture()
+    mocks.create.mockResolvedValue(textStream('……停電か。そこにいて。'))
+
+    await service.startChat(
+      conversation.id,
+      '雨音が強まり、部屋の明かりが消える。',
+      undefined,
+      'narration'
+    )
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'completed')).toBe(true))
+
+    const saved = await store.getConversation(conversation.id)
+    expect(saved.messages[0].inputKind).toBe('narration')
+    const request = mocks.create.mock.calls[0][0]
+    expect(request.instructions).toContain('描写内の文章をユーザーが口にしたセリフとして扱わず')
+    expect(request.input.at(-1).content).toContain('【描写（ユーザーのセリフではない）】')
+  })
+
   it('can skip local rule review when the accuracy option is disabled', async () => {
     const { store, conversation, events, service } = await fixture()
     await store.patchSettings({

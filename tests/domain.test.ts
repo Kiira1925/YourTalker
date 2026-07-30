@@ -67,6 +67,19 @@ describe('character domain', () => {
     expect(input[0].content.length).toBeLessThanOrEqual(120)
   })
 
+  it('marks narration as scene context instead of spoken dialogue', () => {
+    const conversation = createConversation(crypto.randomUUID())
+    conversation.messages = [
+      { ...message('user', '雨音が強まり、部屋の明かりが消える。'), inputKind: 'narration' }
+    ]
+
+    const input = conversationInput(conversation)
+
+    expect(input[0].content).toContain('【描写（ユーザーのセリフではない）】')
+    expect(input[0].content).toContain('雨音が強まり')
+    expect(input[0].content).toContain('【描写ここまで】')
+  })
+
   it('disables a correction without deleting its audit record', () => {
     const character = createCharacter()
     const conversation = createConversation(character.id)

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
 import log from 'electron-log/main'
+import { z } from 'zod'
 import {
   characterSchema,
   nonEmptyTextSchema,
@@ -148,11 +149,18 @@ function registerIpc(): void {
     return bootstrap()
   })
 
-  ipcMain.handle('chat:send', async (_event, rawConversationId, rawContent, rawRetryMessageId) => {
+  ipcMain.handle('chat:send', async (
+    _event,
+    rawConversationId,
+    rawContent,
+    rawInputKind,
+    rawRetryMessageId
+  ) => {
     const conversationId = uuidSchema.parse(rawConversationId)
     const content = nonEmptyTextSchema.parse(rawContent)
+    const inputKind = z.enum(['dialogue', 'narration']).parse(rawInputKind)
     const retryMessageId = rawRetryMessageId ? uuidSchema.parse(rawRetryMessageId) : undefined
-    return { requestId: await openai.startChat(conversationId, content, retryMessageId) }
+    return { requestId: await openai.startChat(conversationId, content, retryMessageId, inputKind) }
   })
   ipcMain.handle('chat:cancel', (_event, rawRequestId) => openai.cancel(uuidSchema.parse(rawRequestId)))
 

@@ -13,7 +13,8 @@ import {
   type Correction,
   type CorrectionResult,
   type Message,
-  type AppSettings
+  type AppSettings,
+  type UserInputKind
 } from '../shared/types'
 import {
   activeRuleCorrections,
@@ -30,7 +31,11 @@ function timestamp(): string {
   return new Date().toISOString()
 }
 
-function newMessage(role: 'user' | 'assistant', content: string): Message {
+function newMessage(
+  role: 'user' | 'assistant',
+  content: string,
+  inputKind?: UserInputKind
+): Message {
   const createdAt = timestamp()
   return {
     id: randomUUID(),
@@ -39,6 +44,7 @@ function newMessage(role: 'user' | 'assistant', content: string): Message {
     updatedAt: createdAt,
     role,
     content,
+    ...(role === 'user' && inputKind ? { inputKind } : {}),
     status: 'complete'
   }
 }
@@ -296,14 +302,25 @@ export class OpenAIService {
     return content
   }
 
-  async startChat(conversationId: string, content: string, retryMessageId?: string): Promise<string> {
+  async startChat(
+    conversationId: string,
+    content: string,
+    retryMessageId?: string,
+    inputKind: UserInputKind = 'dialogue'
+  ): Promise<string> {
     let conversation = await this.store.getConversation(conversationId)
     const existing = retryMessageId
       ? conversation.messages.find((message) => message.id === retryMessageId && message.role === 'user')
       : undefined
     const userMessage = existing
-      ? { ...existing, content, status: 'complete' as const, updatedAt: timestamp() }
-      : newMessage('user', content)
+      ? {
+          ...existing,
+          content,
+          inputKind: existing.inputKind ?? inputKind,
+          status: 'complete' as const,
+          updatedAt: timestamp()
+        }
+      : newMessage('user', content, inputKind)
 
     conversation = {
       ...conversation,
@@ -583,7 +600,14 @@ export class OpenAIService {
           {
             role: 'user' as const,
             content: includedMessages
-              .map((message) => `${message.role === 'user' ? 'ユーザー' : character.name}: ${message.content}`)
+              .map((message) => {
+                const speaker = message.role === 'assistant'
+                  ? character.name
+                  : message.inputKind === 'narration'
+                    ? '描写'
+                    : 'ユーザー'
+                return `${speaker}: ${message.content}`
+              })
               .join('\n')
           }
         ],
@@ -715,7 +739,14 @@ export class OpenAIService {
           role: 'user',
           content: [
             `既存ルール一覧（IDはmergeWithCorrectionIdsへの指定専用）:\n${formatMergeCandidates(character.corrections)}`,
-            `直前までの会話:\n${conversation.messages.slice(-10).map((item) => `${item.role}: ${item.content}`).join('\n')}`,
+            `直前までの会話:\n${conversation.messages.slice(-10).map((item) => {
+              const label = item.role === 'assistant'
+                ? character.name
+                : item.inputKind === 'narration'
+                  ? '描写'
+                  : 'ユーザー'
+              return `${label}: ${item.content}`
+            }).join('\n')}`,
             `修正対象:\n${message.content}`,
             `ユーザーの指摘:\n${feedback}`
           ].join('\n\n')

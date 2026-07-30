@@ -55,6 +55,7 @@ export const messageSchema = z.object({
   ...entityBase,
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+  inputKind: z.enum(['dialogue', 'narration']).optional(),
   originalContent: z.string().optional(),
   correctionId: z.string().uuid().optional(),
   status: z.enum(['complete', 'failed']).optional()
