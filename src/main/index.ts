@@ -1,6 +1,6 @@
 import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
 import log from 'electron-log/main'
 import {
   characterSchema,
@@ -19,6 +19,31 @@ let store: JsonStore
 let secrets: SecretStore
 let openai: OpenAIService
 let updates: UpdateManager
+
+const MAX_AVATAR_SOURCE_BYTES = 15 * 1024 * 1024
+const MAX_AVATAR_DIMENSION = 384
+
+async function loadAvatarDataUrl(path: string): Promise<string> {
+  const sourceStat = await stat(path)
+  if (sourceStat.size > MAX_AVATAR_SOURCE_BYTES) {
+    throw new Error('アイコン画像は15MB以下のものを選んでください。')
+  }
+  const source = nativeImage.createFromPath(path)
+  if (source.isEmpty()) throw new Error('画像を読み込めませんでした。PNG、JPEG、WebP画像を選んでください。')
+  const size = source.getSize()
+  if (size.width <= 0 || size.height <= 0) throw new Error('画像のサイズを確認できませんでした。')
+  const scale = Math.min(1, MAX_AVATAR_DIMENSION / Math.max(size.width, size.height))
+  const image = scale < 1
+    ? source.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'best'
+      })
+    : source
+  const png = image.toPNG()
+  if (png.length === 0) throw new Error('画像をPNGへ変換できませんでした。')
+  return `data:image/png;base64,${png.toString('base64')}`
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -70,7 +95,30 @@ function registerIpc(): void {
     await store.patchSettings({ selectedCharacterId: character.id, selectedConversationId: undefined })
     return character
   })
-  ipcMain.handle('character:save', async (_event, raw) => store.saveCharacter(characterSchema.parse(raw)))
+  ipcMain.handle('character:save', async (_event, raw) => {
+    const incoming = characterSchema.parse(raw)
+    const current = await store.getCharacter(incoming.id)
+    return store.saveCharacter({ ...incoming, avatarDataUrl: current.avatarDataUrl })
+  })
+  ipcMain.handle('character:select-avatar', async (_event, rawId) => {
+    const id = uuidSchema.parse(rawId)
+    const character = await store.getCharacter(id)
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: `${character.name}のアイコン画像を選択`,
+      properties: ['openFile'],
+      filters: [
+        { name: '画像', extensions: ['png', 'jpg', 'jpeg', 'webp'] }
+      ]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const avatarDataUrl = await loadAvatarDataUrl(result.filePaths[0])
+    return store.saveCharacter({ ...character, avatarDataUrl })
+  })
+  ipcMain.handle('character:clear-avatar', async (_event, rawId) => {
+    const character = await store.getCharacter(uuidSchema.parse(rawId))
+    const { avatarDataUrl: _avatarDataUrl, ...withoutAvatar } = character
+    return store.saveCharacter(withoutAvatar)
+  })
   ipcMain.handle('character:analyze-description', async (_event, rawId, rawDescription, rawMode) => {
     const mode = rawMode as 'overwrite' | 'fill-empty'
     if (!['overwrite', 'fill-empty'].includes(mode)) throw new Error('反映方法が不正です。')

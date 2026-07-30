@@ -65,6 +65,7 @@ export interface CharacterAnalysisResult {
 }
 
 export interface CharacterProfile extends EntityBase, CharacterAnalysisResult {
+  avatarDataUrl?: string
   learnedGuidance: string
   corrections: Correction[]
 }
@@ -145,6 +146,8 @@ export interface YourTalkerApi {
   character: {
     create(): Promise<CharacterProfile>
     save(character: CharacterProfile): Promise<CharacterProfile>
+    selectAvatar(characterId: string): Promise<CharacterProfile | null>
+    clearAvatar(characterId: string): Promise<CharacterProfile>
     analyzeDescription(
       characterId: string,
       description: string,

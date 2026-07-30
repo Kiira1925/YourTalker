@@ -2,6 +2,7 @@ import {
   Archive,
   BookOpen,
   Bot,
+  Camera,
   Check,
   ChevronLeft,
   CircleAlert,
@@ -239,6 +240,73 @@ function App() {
     }
   }
 
+  async function selectAvatar() {
+    if (!selectedCharacterId) return
+    setSaving(true)
+    try {
+      if (draft && draftDirty) {
+        const persisted = await window.yourTalker.character.save(draft)
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                characters: current.characters.map((item) => (item.id === persisted.id ? persisted : item))
+              }
+            : current
+        )
+        setDraft(structuredClone(persisted))
+        setDraftDirty(false)
+      }
+      const saved = await window.yourTalker.character.selectAvatar(selectedCharacterId)
+      if (!saved) return
+      setData((current) =>
+        current
+          ? { ...current, characters: current.characters.map((item) => (item.id === saved.id ? saved : item)) }
+          : current
+      )
+      setDraft(structuredClone(saved))
+      setDraftDirty(false)
+      setToast('アイコン画像を設定しました')
+    } catch (reason) {
+      setError(messageFrom(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearAvatar() {
+    if (!selectedCharacterId) return
+    setSaving(true)
+    try {
+      if (draft && draftDirty) {
+        const persisted = await window.yourTalker.character.save(draft)
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                characters: current.characters.map((item) => (item.id === persisted.id ? persisted : item))
+              }
+            : current
+        )
+        setDraft(structuredClone(persisted))
+        setDraftDirty(false)
+      }
+      const saved = await window.yourTalker.character.clearAvatar(selectedCharacterId)
+      setData((current) =>
+        current
+          ? { ...current, characters: current.characters.map((item) => (item.id === saved.id ? saved : item)) }
+          : current
+      )
+      setDraft(structuredClone(saved))
+      setDraftDirty(false)
+      setToast('アイコン画像を削除しました')
+    } catch (reason) {
+      setError(messageFrom(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function addConversation() {
     if (!selectedCharacterId) return
     try {
@@ -446,7 +514,7 @@ function App() {
               className={`character-card ${character.id === selectedCharacterId ? 'active' : ''}`}
               onClick={() => void selectCharacter(character.id)}
             >
-              <span className="avatar">{character.name.trim().slice(0, 1) || '?'}</span>
+              <CharacterAvatar character={character} className="avatar" />
               <span>
                 <strong>{character.name}</strong>
                 <small>{character.overview || '設定を追加して育てましょう'}</small>
@@ -555,7 +623,7 @@ function App() {
               ))}
               {activeRequestId && streamText && (
                 <div className="message assistant">
-                  <span className="message-avatar">{selectedCharacter.name.slice(0, 1)}</span>
+                  <CharacterAvatar character={selectedCharacter} className="message-avatar" />
                   <div className="bubble">
                     <p>{streamText}<span className="stream-caret" /></p>
                     {reviewingReply && (
@@ -566,7 +634,7 @@ function App() {
               )}
               {activeRequestId && !streamText && (
                 <div className="message assistant thinking">
-                  <span className="message-avatar">{selectedCharacter.name.slice(0, 1)}</span>
+                  <CharacterAvatar character={selectedCharacter} className="message-avatar" />
                   <div className="typing-dots"><i /><i /><i /></div>
                 </div>
               )}
@@ -625,10 +693,25 @@ function App() {
           {rightTab === 'profile' ? (
             <div className="profile-editor">
               <div className="panel-intro">
-                <span className="avatar large-avatar">{draft.name.trim().slice(0, 1) || '?'}</span>
-                <div>
+                <button
+                  type="button"
+                  className="avatar-picker"
+                  onClick={() => void selectAvatar()}
+                  aria-label="アイコン画像を選択"
+                  title="アイコン画像を選択"
+                >
+                  <CharacterAvatar character={draft} className="avatar large-avatar" />
+                  <span className="avatar-picker-badge"><Camera size={11} /></span>
+                </button>
+                <div className="panel-intro-copy">
                   <h2>らしさの設計図</h2>
                   <p>空欄のままでも大丈夫。会話しながら育てられます。</p>
+                  <div className="avatar-actions">
+                    <button type="button" onClick={() => void selectAvatar()}>画像を選択</button>
+                    {draft.avatarDataUrl && (
+                      <button type="button" onClick={() => void clearAvatar()}>削除</button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="description-import-card">
@@ -821,6 +904,24 @@ function App() {
   )
 }
 
+function CharacterAvatar({
+  character,
+  className
+}: {
+  character: Pick<CharacterProfile, 'name' | 'avatarDataUrl'>
+  className: string
+}) {
+  return (
+    <span className={className} aria-hidden="true">
+      {character.avatarDataUrl ? (
+        <img src={character.avatarDataUrl} alt="" />
+      ) : (
+        character.name.trim().slice(0, 1) || '?'
+      )}
+    </span>
+  )
+}
+
 function EmptyWelcome({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="empty-stage">
@@ -839,7 +940,7 @@ function EmptyWelcome({ onCreate }: { onCreate: () => void }) {
 function EmptyConversation({ character, onCreate }: { character: CharacterProfile; onCreate: () => void }) {
   return (
     <div className="empty-stage conversation-empty-stage">
-      <span className="avatar hero-avatar">{character.name.slice(0, 1)}</span>
+      <CharacterAvatar character={character} className="avatar hero-avatar" />
       <span className="eyebrow">READY WHEN YOU ARE</span>
       <h2>{character.name}との新しい会話</h2>
       <p>{character.overview || '右側の設計図を埋めるか、まずは気軽に話しかけてみましょう。'}</p>
@@ -861,7 +962,7 @@ function MessageBubble({
 }) {
   return (
     <div className={`message ${message.role} ${message.status === 'failed' ? 'failed' : ''}`}>
-      {message.role === 'assistant' && <span className="message-avatar">{character.name.slice(0, 1)}</span>}
+      {message.role === 'assistant' && <CharacterAvatar character={character} className="message-avatar" />}
       <div className="bubble">
         <p>{message.content}</p>
         {message.correctionId && <span className="corrected-label"><Sparkles size={12} /> 指摘を反映済み</span>}

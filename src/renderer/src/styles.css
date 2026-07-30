@@ -100,8 +100,9 @@ button, summary { cursor: pointer; }
 .character-card.active { background: var(--paper); border-color: #dad6cd; box-shadow: 0 3px 12px rgba(38,48,44,.06); }
 .avatar {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-  color: var(--teal-dark); background: var(--teal-soft); font-weight: 700;
+  color: var(--teal-dark); background: var(--teal-soft); font-weight: 700; overflow: hidden;
 }
+.avatar img, .message-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .character-card > span:last-child { min-width: 0; }
 .character-card strong { display: block; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .character-card small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -160,7 +161,7 @@ button, summary { cursor: pointer; }
 }
 .message { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 21px; }
 .message.user { justify-content: flex-end; }
-.message-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--teal-soft); color: var(--teal); font-size: 11px; font-weight: 700; flex: 0 0 auto; }
+.message-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; overflow: hidden; background: var(--teal-soft); color: var(--teal); font-size: 11px; font-weight: 700; flex: 0 0 auto; }
 .bubble { max-width: min(78%, 620px); }
 .bubble > p {
   white-space: pre-wrap; margin: 0; padding: 13px 16px; border: 1px solid var(--line); border-radius: 5px 17px 17px 17px;
@@ -239,6 +240,23 @@ button, summary { cursor: pointer; }
 }
 .panel-intro { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .large-avatar { width: 44px; height: 44px; font-size: 15px; }
+.avatar-picker {
+  position: relative; flex: 0 0 auto; width: 44px; height: 44px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent;
+}
+.avatar-picker:hover .large-avatar { box-shadow: 0 0 0 3px rgba(46, 109, 100, .15); }
+.avatar-picker-badge {
+  position: absolute; right: -3px; bottom: -2px; width: 20px; height: 20px;
+  display: grid; place-items: center; border: 2px solid var(--paper); border-radius: 50%;
+  color: #fff; background: var(--teal); box-shadow: 0 2px 6px rgba(38, 48, 44, .18);
+}
+.panel-intro-copy { min-width: 0; }
+.avatar-actions { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.avatar-actions button {
+  padding: 0; border: 0; background: transparent; color: var(--teal); font-size: 9px;
+}
+.avatar-actions button + button { color: var(--muted); }
+.avatar-actions button:hover { text-decoration: underline; }
 .panel-intro h2 { margin: 0; font-size: 14px; }
 .panel-intro p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
 .description-import-card {

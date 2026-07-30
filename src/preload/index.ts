@@ -15,6 +15,8 @@ const api: YourTalkerApi = {
   character: {
     create: () => ipcRenderer.invoke('character:create'),
     save: (character: CharacterProfile) => ipcRenderer.invoke('character:save', character),
+    selectAvatar: (characterId: string) => ipcRenderer.invoke('character:select-avatar', characterId),
+    clearAvatar: (characterId: string) => ipcRenderer.invoke('character:clear-avatar', characterId),
     analyzeDescription: (characterId: string, description: string, mode: CharacterAnalysisMode) =>
       ipcRenderer.invoke('character:analyze-description', characterId, description, mode),
     remove: (characterId: string) => ipcRenderer.invoke('character:remove', characterId)

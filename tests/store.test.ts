@@ -35,7 +35,12 @@ describe('JsonStore', () => {
 
   it('round-trips a full export without secrets', async () => {
     const source = await testStore()
-    const character = await source.saveCharacter({ ...createCharacter(), name: 'エクスポート対象' })
+    const avatarDataUrl = 'data:image/png;base64,iVBORw0KGgo='
+    const character = await source.saveCharacter({
+      ...createCharacter(),
+      name: 'エクスポート対象',
+      avatarDataUrl
+    })
     await source.saveConversation({ ...createConversation(character.id), title: '残したい会話' })
     await writeFile(source.secretPath, 'must-not-leak', 'utf8')
 
@@ -45,7 +50,10 @@ describe('JsonStore', () => {
 
     const destination = await testStore()
     await destination.importBundle(JSON.parse(serialized), 'replace')
-    expect((await destination.listCharacters()).map((item) => item.name)).toContain('エクスポート対象')
+    const importedCharacter = (await destination.listCharacters()).find(
+      (item) => item.name === 'エクスポート対象'
+    )
+    expect(importedCharacter?.avatarDataUrl).toBe(avatarDataUrl)
     expect((await destination.listConversations()).map((item) => item.title)).toContain('残したい会話')
   })
 

@@ -42,6 +42,11 @@ export const characterSchema = z.object({
   ...entityBase,
   ...characterAnalysisFields,
   name: z.string().min(1),
+  avatarDataUrl: z
+    .string()
+    .max(2_500_000)
+    .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+    .optional(),
   learnedGuidance: z.string(),
   corrections: z.array(correctionSchema)
 })
